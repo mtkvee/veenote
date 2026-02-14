@@ -6,9 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "firebase:login": "npx firebase-tools login",
+    "firebase:deploy:firestore": "npx firebase-tools deploy --only firestore:rules,firestore:indexes"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.2.0",
+    "firebase": "^12.9.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"

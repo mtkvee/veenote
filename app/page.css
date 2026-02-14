@@ -1,0 +1,882 @@
+.outer,
+.phone,
+.card,
+.editor,
+.modal,
+.pickerDialog,
+.noteDialog,
+.search,
+.selectButton,
+.manageButton,
+.saveButton,
+.cancelButton,
+.copyIconButton,
+.pasteIconButton,
+.googleButton,
+.fab,
+.signOut {
+  transition: all 0.18s ease;
+}
+
+:root {
+  --ui-bg: #ffffff;
+  --ui-border: #e6e9ee;
+  --ui-border-strong: #d8dde4;
+  --ui-text: #505050;
+  --ui-muted: #505050;
+  --ui-focus: rgba(26, 115, 232, 0.18);
+  --ui-hover: #f8fafd;
+  --ui-shadow-soft: 0 10px 30px rgba(16, 24, 40, 0.06);
+  --ui-shadow-card: 0 4px 12px rgba(16, 24, 40, 0.06);
+}
+
+.phone,
+.phone * {
+  color: #505050;
+}
+
+.phone {
+  font-size: 0.9rem;
+}
+
+.phone :where(p, span, button, input, textarea, select, time, a, li) {
+  font-size: 0.9rem;
+}
+
+.phone input::placeholder,
+.phone textarea::placeholder {
+  color: #505050;
+  font-size: 0.9rem;
+  opacity: 1;
+}
+
+.outer {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: transparent;
+}
+
+.phone {
+  position: relative;
+  overflow: hidden;
+  width: min(100%, 390px);
+  min-height: 82dvh;
+  border-radius: 30px;
+  background: var(--ui-bg);
+  padding: 1.25rem 1.1rem 5.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: var(--ui-shadow-soft);
+}
+
+.phone::before,
+.phone::after {
+  content: "";
+  position: absolute;
+  width: 600px;
+  height: 700px;
+  border-radius: 50%;
+  filter: blur(92px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.phone::before {
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  background: rgba(112, 168, 255, 0.1);
+}
+
+.phone::after {
+  right: 0;
+  bottom: 0;
+  transform: translate(50%, 50%);
+  background: rgba(255, 184, 108, 0.1);
+}
+
+.phone > * {
+  position: relative;
+  z-index: 1;
+}
+
+.googleButton {
+  margin: auto;
+  width: fit-content;
+  border: 0;
+  border-radius: 30px;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.9rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  box-shadow: 0 4px 10px rgba(80, 80, 80, 0.12);
+}
+
+.googleButton i {
+  font-size: 1.25rem;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: 3fr auto auto;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.selectButton,
+.manageButton,
+.search {
+  border: 1px solid var(--ui-border);
+  border-radius: 30px;
+  background: var(--ui-bg);
+  font-size: 0.9rem;
+}
+
+.selectButton {
+  width: 100%;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+}
+
+.labelTriggerButton {
+  border: 0;
+  border-radius: 30px;
+  background: #e9e9e9;
+  min-height: 30px;
+  padding: 0 0.8rem;
+}
+
+.labelTriggerButton:hover {
+  background: #e9e9e9 !important;
+}
+
+.filterButton {
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 0.6rem;
+  display: inline-flex;
+  border-radius: 50%;
+}
+
+.filterButton i {
+  width: 16px;
+  font-size: 14px;
+  color: var(--ui-muted);
+}
+
+.manageButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: auto;
+  padding: 0.65rem 0.55rem;
+  border-radius: 50%;
+}
+
+.manageButton i {
+  font-size: 14px;
+  color: var(--ui-muted);
+}
+
+.search {
+  border: var(--ui-shadow-card);
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  background: var(--ui-bg);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-content: start;
+  padding-bottom: 0.4rem;
+}
+
+.card {
+  position: relative;
+  border-radius: 20px;
+  background: var(--ui-bg);
+  min-height: 150px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: var(--ui-shadow-card);
+}
+
+.cardInteractive {
+  cursor: pointer;
+}
+
+.card h3 {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ui-text);
+  padding-right: 1.8rem;
+}
+
+.cardTime {
+  font-size: 0.75rem;
+  color: var(--ui-muted);
+  margin-top: -0.3rem;
+  display: none;
+}
+
+.card p {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #505050;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+textarea {
+  resize: none;
+}
+
+.card footer {
+  margin-top: auto;
+  display: block;
+}
+
+.cardLabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.cardLabelChip {
+  max-width: 100%;
+  min-height: 28px;
+  border-radius: 999px;
+  background: #dfe5ef;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+}
+
+.cardLabelText {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 95px;
+}
+
+.cardDeleteButton {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ui-border);
+  border-radius: 30px;
+  background: var(--ui-bg);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(80, 80, 80, 0.1);
+}
+
+.cardDeleteButton i {
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+
+.fab {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  width: 50px;
+  height: 50px;
+  border: 0;
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-card);
+}
+
+.fab i {
+  font-size: 1.5rem;
+}
+
+.editor {
+  margin: auto 0;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  min-height: 68dvh;
+  border-radius: 14px;
+  padding: 1rem 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.editor .selectButton {
+  width: fit-content;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.editorTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.editorBottomActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: auto;
+}
+
+.editorTop h2,
+.modal h2,
+.pickerDialog h3,
+.confirmDialog h3 {
+  font-size: 1rem;
+}
+
+.saveButton,
+.cancelButton {
+  border: 1px solid var(--ui-border);
+  border-radius: 30px;
+  background: var(--ui-bg);
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(80, 80, 80, 0.1);
+}
+
+.saveButton {
+  background: #fff;
+}
+
+.titleInput,
+.bodyInput {
+  border: none;
+  background: transparent;
+  font-size: 0.9rem;
+  padding: 0.45rem 0;
+}
+
+.bodyInput {
+  width: 100%;
+  min-height: 180px;
+  display: block;
+  border-bottom: none;
+  resize: vertical;
+  font-size: 0.9rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  padding: 0;
+  scrollbar-width: none;
+}
+
+.editorBodyWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.bodyInput::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.signOut {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  border: 0;
+  border-radius: 30px;
+  padding: 0.75rem;
+  background: var(--ui-bg);
+  font-size: 0.9rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  box-shadow: 0 4px 10px rgba(80, 80, 80, 0.12);
+}
+
+.signOut i {
+  font-size: 1.25rem;
+}
+
+.modalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(32, 33, 36, 0.35);
+  border-radius: 28px;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal {
+  width: min(100%, 320px);
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  padding: 1rem 1rem 1.05rem;
+  max-height: 72%;
+  overflow: auto;
+}
+
+.modalRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  margin: 1rem 0;
+}
+
+.modalRow input,
+.modalRow button {
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-bg);
+  min-height: 38px;
+  padding: 0.55rem 0.65rem;
+}
+
+.modalRow input {
+  min-width: 0;
+}
+
+.modalRow button {
+  white-space: nowrap;
+}
+
+.modalRow button {
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(80, 80, 80, 0.1);
+}
+
+.labelList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.labelItem {
+  border: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+}
+
+.labelItem button {
+  border: none;
+  background: transparent;
+  color: #c5221f;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.labelItem button i {
+  font-size: 0.9rem;
+}
+
+.pendingLabelButton {
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-bg);
+  color: var(--ui-muted);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.loading,
+.empty,
+.error,
+.configError {
+  margin: auto;
+  text-align: center;
+  font-weight: 500;
+  color: var(--ui-muted);
+}
+
+.phoneEmpty {
+  margin: 0;
+  pointer-events: none;
+}
+
+.phoneEmptyWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+}
+
+.error {
+  color: #c5221f;
+}
+
+.pickerBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(32, 33, 36, 0.22);
+  border-radius: 28px;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.pickerDialog {
+  width: min(100%, 280px);
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg);
+  padding: 0.9rem;
+  box-shadow: var(--ui-shadow-soft);
+}
+
+.pickerDialog h3 {
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+.pickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.noteLabelPickerDialog {
+  width: min(100%, 300px);
+  max-height: 78dvh;
+  background: #f3f3f3;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  box-shadow: var(--ui-shadow-soft);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.noteLabelOptions {
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  overflow: auto;
+  padding: 0.65rem 0;
+}
+
+.noteLabelOption {
+  border: 0;
+  background: transparent;
+  min-height: 40px;
+  padding: 0.45rem 0.9rem;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: left;
+}
+
+.noteLabelOption input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #505050;
+  pointer-events: none;
+}
+
+.noteLabelFooter {
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 0.65rem;
+  padding-bottom: 0.65rem;
+  background: #f3f3f3;
+}
+
+.noteLabelFooter .saveButton {
+  border: 1px solid #d6dbe3;
+  border-radius: 12px;
+  background: #f3f3f3;
+  color: #3f4a5a;
+  min-height: 44px;
+  padding: 0 1.15rem;
+  font-weight: 600;
+}
+
+.pickerOption,
+.pickerOptionActive {
+  width: 100%;
+  border-radius: 8px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  border: 0;
+  background: var(--ui-hover);
+}
+
+.pickerOptionActive {
+  border: 0;
+  background: var(--ui-hover);
+}
+
+.pickerLabel {
+  color: var(--ui-text);
+}
+
+.pickerCount {
+  min-width: 1.9rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: #e8edf3;
+  color: #4a5565;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.noteDialogBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(32, 33, 36, 0.28);
+  border-radius: 28px;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.noteDialog {
+  width: min(100%, 340px);
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: var(--ui-shadow-soft);
+}
+
+.noteDialog h2 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.noteDialogBody {
+  width: 100%;
+  min-height: 130px;
+  border: none;
+  font-size: 0.9rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.noteDialogBody:focus {
+  outline: none;
+  border-color: #d6dadd;
+  box-shadow: 0 0 0 2px rgba(31, 31, 31, 0.08);
+}
+
+.noteDialogBodyWrap {
+  position: relative;
+}
+
+.textActionButtons {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  display: flex;
+  gap: 0.35rem;
+  z-index: 2;
+}
+
+.noteDialogRow {
+  display: block;
+  width: fit-content;
+}
+
+.copyIconButton {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d7dce4;
+  border-radius: 999px;
+  background: #f7f8fb;
+  padding: 0;
+  box-shadow: 0 4px 14px rgba(80, 80, 80, 0.14);
+}
+
+.copyIconButton i,
+.pasteIconButton i {
+  font-size: 16px;
+  color: #505050;
+}
+
+.pasteIconButton {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d7dce4;
+  border-radius: 999px;
+  background: #f7f8fb;
+  padding: 0;
+  box-shadow: 0 4px 14px rgba(80, 80, 80, 0.14);
+}
+
+.noteDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.2rem;
+}
+
+.noteDialogActions button {
+  border-radius: 30px;
+}
+
+.confirmBackdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: 28px;
+  background: rgba(32, 33, 36, 0.3);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.confirmDialog {
+  width: min(100%, 300px);
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg);
+  box-shadow: var(--ui-shadow-soft);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.confirmDialog h3 {
+  color: var(--ui-text);
+}
+
+.confirmDialog p {
+  font-size: 0.9rem;
+  padding: 1.25rem 0;
+  color: var(--ui-muted);
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.dangerButton {
+  border: 1px solid #f2c6c3;
+  border-radius: 8px;
+  background: #fce8e6;
+  color: #a50e0e;
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+}
+
+.loadMoreButton {
+  width: 100%;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ui-text);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: var(--ui-shadow-soft);
+}
+
+.cardInteractive:hover {
+  transform: translateY(-1px);
+  border-color: var(--ui-border-strong);
+}
+
+.selectButton:hover,
+.manageButton:hover,
+.saveButton:hover,
+.cancelButton:hover,
+.copyIconButton:hover,
+.pasteIconButton:hover,
+.cardDeleteButton:hover,
+.fab:hover,
+.signOut:hover,
+.googleButton:hover,
+.modalRow button:hover,
+.pickerOption:hover,
+.loadMoreButton:hover {
+  background: var(--ui-hover);
+}
+
+.search:hover,
+.titleInput:hover,
+.bodyInput:hover,
+.noteDialogBody:hover,
+.modalRow input:hover {
+  border-color: var(--ui-border-strong);
+}
+
+.titleInput:focus,
+.bodyInput:focus,
+.search:focus,
+.selectButton:focus,
+.modalRow input:focus,
+.noteDialogBody:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+@media (max-width: 480px) {
+  .outer {
+    padding: 0.8rem;
+  }
+
+  .phone {
+    width: 100%;
+    min-height: 88dvh;
+    border-radius: 22px;
+    padding: 1rem 0.9rem 4.9rem;
+  }
+
+  .grid {
+    gap: 0.7rem;
+  }
+
+  .fab {
+    width: 52px;
+    height: 52px;
+  }
+}

@@ -1,66 +1,1159 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import {
+  User,
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+} from "firebase/auth";
+import {
+  DocumentData,
+  QueryDocumentSnapshot,
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  startAfter,
+  setDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import { auth, db, firebaseReady, googleProvider } from "@/lib/firebase";
+import {
+  applyQueueToLabels,
+  applyQueueToNotes,
+  loadQueue,
+  mapFirestoreNote,
+  newId,
+  saveQueue,
+} from "@/lib/notesSync";
+import type { Label, Note, SyncMutation } from "@/lib/notesSync";
+import "./page.css";
+
+const NOTES_PAGE_SIZE = 40;
+const MAX_SYNC_QUEUE_SIZE = 250;
+const BASE_SYNC_INTERVAL_MS = 1200;
+const MAX_BACKOFF_MS = 15000;
+
+type FirestoreNoteData = {
+  title?: string;
+  body?: string;
+  labelIds?: string[];
+  labelNames?: string[];
+  labelId?: string;
+  labelName?: string;
+  updatedAtMs?: number;
+  updatedAt?: { toMillis: () => number };
+};
 
 export default function Home() {
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
+  const [authLoading, setAuthLoading] = useState(firebaseReady);
+  const [user, setUser] = useState<User | null>(null);
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [syncQueue, setSyncQueue] = useState<SyncMutation[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+  const [loadingMoreNotes, setLoadingMoreNotes] = useState(false);
+  const [hasMoreNotes, setHasMoreNotes] = useState(false);
+  const [notesCursor, setNotesCursor] =
+    useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [search, setSearch] = useState("");
+  const [selectedLabel, setSelectedLabel] = useState("all");
+  const [showFilterPicker, setShowFilterPicker] = useState(false);
+  const [showLabelManager, setShowLabelManager] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [showEditor, setShowEditor] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteBody, setNoteBody] = useState("");
+  const [noteLabels, setNoteLabels] = useState<string[]>([]);
+  const [showEditorLabelPicker, setShowEditorLabelPicker] = useState(false);
+  const [showNoteDialog, setShowNoteDialog] = useState(false);
+  const [showNoteLabelPicker, setShowNoteLabelPicker] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState("");
+  const [pendingDeleteNoteTitle, setPendingDeleteNoteTitle] = useState("");
+  const [activeNoteId, setActiveNoteId] = useState("");
+  const [activeNoteTitle, setActiveNoteTitle] = useState("");
+  const [activeNoteBody, setActiveNoteBody] = useState("");
+  const [activeNoteLabels, setActiveNoteLabels] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const queueRef = useRef<SyncMutation[]>([]);
+  const syncInFlightRef = useRef(false);
+  const nextSyncAttemptAtRef = useRef(0);
+  const syncIntervalRef = useRef(BASE_SYNC_INTERVAL_MS);
+  const firstPageNoteIdsRef = useRef<Set<string>>(new Set());
+
+  const getLabelTriggerText = (selectedIds: string[]) => {
+    if (selectedIds.length === 0) return "Add label";
+    return labels
+      .filter((label) => selectedIds.includes(label.id))
+      .map((label) => label.name)
+      .join(", ");
+  };
+
+  useEffect(() => {
+    if (!firebaseReady || !auth) return;
+
+    getRedirectResult(auth).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "Sign-in redirect failed.");
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (!currentUser) {
+        setLabels([]);
+        setNotes([]);
+        setSyncQueue([]);
+        setHasMoreNotes(false);
+        setNotesCursor(null);
+        firstPageNoteIdsRef.current = new Set();
+        setLoadingData(false);
+      } else {
+        const queued = loadQueue(currentUser.uid);
+        setSyncQueue(queued);
+        setLabels(applyQueueToLabels([], queued));
+        setNotes(applyQueueToNotes([], queued));
+        setHasMoreNotes(false);
+        setNotesCursor(null);
+        firstPageNoteIdsRef.current = new Set();
+        setLoadingData(true);
+      }
+      setAuthLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    queueRef.current = syncQueue;
+    if (user) saveQueue(user.uid, syncQueue);
+  }, [syncQueue, user]);
+
+  useEffect(() => {
+    if (!user || !db) return;
+
+    const labelsRef = collection(db, "users", user.uid, "labels");
+    const notesRef = collection(db, "users", user.uid, "notes");
+
+    const unsubscribeLabels = onSnapshot(labelsRef, (snapshot) => {
+      const incoming = snapshot.docs.map((docItem) => {
+        const data = docItem.data() as { name?: string };
+        return { id: docItem.id, name: data.name ?? "" };
+      });
+      incoming.sort((a, b) => a.name.localeCompare(b.name));
+      setLabels(applyQueueToLabels(incoming, queueRef.current));
+    });
+
+    const firstPageQuery = query(
+      notesRef,
+      orderBy("updatedAtMs", "desc"),
+      limit(NOTES_PAGE_SIZE),
+    );
+
+    const unsubscribeNotes = onSnapshot(firstPageQuery, (snapshot) => {
+      const incoming = snapshot.docs.map((docItem) =>
+        mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
+      );
+      incoming.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+      const prevFirstPageIds = firstPageNoteIdsRef.current;
+      const nextFirstPageIds = new Set(incoming.map((note) => note.id));
+      firstPageNoteIdsRef.current = nextFirstPageIds;
+
+      setHasMoreNotes(snapshot.docs.length === NOTES_PAGE_SIZE);
+      setNotesCursor(snapshot.docs.at(-1) ?? null);
+      setNotes((prev) => {
+        const preservedOlderNotes = prev.filter(
+          (note) => !prevFirstPageIds.has(note.id) && !nextFirstPageIds.has(note.id),
+        );
+        return applyQueueToNotes(
+          [...incoming, ...preservedOlderNotes],
+          queueRef.current,
+        );
+      });
+      setLoadingData(false);
+    });
+
+    return () => {
+      unsubscribeLabels();
+      unsubscribeNotes();
+    };
+  }, [user]);
+
+  const enqueueMutations = useCallback((mutations: SyncMutation[]) => {
+    if (mutations.length === 0) return;
+    setSyncQueue((prev) => {
+      let next = [...prev];
+      mutations.forEach((mutation) => {
+        if (mutation.type === "note_upsert") {
+          next = next.filter(
+            (item) =>
+              !(
+                item.type === "note_upsert" &&
+                item.note.id === mutation.note.id
+              ),
+          );
+          next.push(mutation);
+          return;
+        }
+        if (mutation.type === "label_upsert") {
+          next = next.filter(
+            (item) =>
+              !(
+                item.type === "label_upsert" &&
+                item.label.id === mutation.label.id
+              ),
+          );
+          next.push(mutation);
+          return;
+        }
+        if (mutation.type === "note_delete") {
+          next = next.filter(
+            (item) =>
+              !(
+                (item.type === "note_upsert" && item.note.id === mutation.noteId) ||
+                (item.type === "note_delete" && item.noteId === mutation.noteId)
+              ),
+          );
+          next.push(mutation);
+          return;
+        }
+        next = next.filter(
+          (item) =>
+            !(
+              (item.type === "label_upsert" &&
+                item.label.id === mutation.labelId) ||
+              (item.type === "label_delete" && item.labelId === mutation.labelId)
+            ),
+        );
+        next.push(mutation);
+      });
+      if (next.length > MAX_SYNC_QUEUE_SIZE) {
+        next = next.slice(next.length - MAX_SYNC_QUEUE_SIZE);
+      }
+      return next;
+    });
+  }, []);
+
+  const flushQueue = useCallback(async () => {
+    if (!db || !user || syncInFlightRef.current) return;
+    if (queueRef.current.length === 0) return;
+    if (Date.now() < nextSyncAttemptAtRef.current) return;
+    syncInFlightRef.current = true;
+    try {
+      while (queueRef.current.length > 0) {
+        const next = queueRef.current[0];
+        if (next.type === "label_upsert") {
+          await setDoc(
+            doc(db, "users", user.uid, "labels", next.label.id),
+            {
+              name: next.label.name,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } else if (next.type === "label_delete") {
+          await deleteDoc(doc(db, "users", user.uid, "labels", next.labelId));
+        } else if (next.type === "note_upsert") {
+          const labelId = next.note.labelIds[0] ?? "none";
+          const labelName = next.note.labelNames[0] ?? "No label";
+          await setDoc(
+            doc(db, "users", user.uid, "notes", next.note.id),
+            {
+              title: next.note.title,
+              body: next.note.body,
+              labelIds: next.note.labelIds,
+              labelNames: next.note.labelNames,
+              labelId,
+              labelName,
+              updatedAtMs: next.note.updatedAtMs,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } else {
+          await deleteDoc(doc(db, "users", user.uid, "notes", next.noteId));
+        }
+
+        setSyncQueue((prev) => {
+          if (prev.length === 0) return prev;
+          if (prev[0].id === next.id) return prev.slice(1);
+          return prev.filter((item) => item.id !== next.id);
+        });
+      }
+      syncIntervalRef.current = BASE_SYNC_INTERVAL_MS;
+      nextSyncAttemptAtRef.current = 0;
+      setError("");
+    } catch {
+      syncIntervalRef.current = Math.min(
+        syncIntervalRef.current * 2,
+        MAX_BACKOFF_MS,
+      );
+      nextSyncAttemptAtRef.current = Date.now() + syncIntervalRef.current;
+      setError("Saved locally. Cloud sync will retry automatically.");
+    } finally {
+      syncInFlightRef.current = false;
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!db) return;
+    if (queueRef.current.length === 0) return;
+    const timer = window.setInterval(() => {
+      void flushQueue();
+    }, BASE_SYNC_INTERVAL_MS);
+    const onlineHandler = () => {
+      void flushQueue();
+    };
+    window.addEventListener("online", onlineHandler);
+    void flushQueue();
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("online", onlineHandler);
+    };
+  }, [flushQueue, syncQueue.length]);
+
+  const handleLoadMoreNotes = useCallback(async () => {
+    if (!db || !user || !notesCursor || loadingMoreNotes || !hasMoreNotes) return;
+    setLoadingMoreNotes(true);
+    try {
+      const notesRef = collection(db, "users", user.uid, "notes");
+      const nextPage = query(
+        notesRef,
+        orderBy("updatedAtMs", "desc"),
+        startAfter(notesCursor),
+        limit(NOTES_PAGE_SIZE),
+      );
+      const snapshot = await getDocs(nextPage);
+      const incoming = snapshot.docs.map((docItem) =>
+        mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
+      );
+      setNotesCursor(snapshot.docs.at(-1) ?? notesCursor);
+      setHasMoreNotes(snapshot.docs.length === NOTES_PAGE_SIZE);
+      setNotes((prev) => {
+        const seen = new Set(prev.map((note) => note.id));
+        const merged = [...prev];
+        incoming.forEach((note) => {
+          if (!seen.has(note.id)) merged.push(note);
+        });
+        return applyQueueToNotes(merged, queueRef.current);
+      });
+    } finally {
+      setLoadingMoreNotes(false);
+    }
+  }, [hasMoreNotes, loadingMoreNotes, notesCursor, user]);
+
+  const visibleNotes = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return notes.filter((note) => {
+      const labelMatches =
+        selectedLabel === "all" || note.labelIds.includes(selectedLabel);
+      const textMatches =
+        keyword.length === 0 ||
+        note.title.toLowerCase().includes(keyword) ||
+        note.body.toLowerCase().includes(keyword);
+      return labelMatches && textMatches;
+    });
+  }, [notes, search, selectedLabel]);
+
+  const labelNoteCounts = useMemo(() => {
+    const counts: Record<string, number> = { none: 0 };
+    notes.forEach((note) => {
+      if (note.labelIds.length === 0) {
+        counts.none = (counts.none ?? 0) + 1;
+        return;
+      }
+      note.labelIds.forEach((key) => {
+        counts[key] = (counts[key] ?? 0) + 1;
+      });
+    });
+    return counts;
+  }, [notes]);
+
+  const displayedLabels = useMemo(
+    () => labels.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [labels],
+  );
+
+  const handleSignIn = async () => {
+    if (!auth) return;
+    setError("");
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch {
+      await signInWithRedirect(auth, googleProvider);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (!auth) return;
+    await signOut(auth);
+  };
+
+  const handleCreateLabel = (e: FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const name = newLabel.trim();
+    if (!name) return;
+    const exists = displayedLabels.some(
+      (label) => label.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (exists) {
+      setError("Label already exists.");
+      return;
+    }
+
+    const labelId = newId("label");
+    setError("");
+    setNewLabel("");
+    const mutation: SyncMutation = {
+      id: newId("mutation"),
+      type: "label_upsert",
+      label: { id: labelId, name },
+    };
+    setLabels((prev) => applyQueueToLabels(prev, [mutation]));
+    enqueueMutations([mutation]);
+  };
+
+  const handleDeleteLabel = (labelId: string) => {
+    if (!user) return;
+    const noteMutations: SyncMutation[] = [];
+    const deleteMutation: SyncMutation = {
+      id: newId("mutation"),
+      type: "label_delete",
+      labelId,
+    };
+
+    setLabels((prev) => applyQueueToLabels(prev, [deleteMutation]));
+    setNotes((prev) =>
+      prev.map((note) => {
+        const index = note.labelIds.indexOf(labelId);
+        if (index === -1) return note;
+        const nextLabelIds = note.labelIds.filter((id) => id !== labelId);
+        const nextLabelNames = note.labelNames.filter(
+          (_, idx) => idx !== index,
+        );
+        const updatedNote: Note = {
+          ...note,
+          labelIds: nextLabelIds,
+          labelNames: nextLabelNames,
+          updatedAtMs: Date.now(),
+        };
+        noteMutations.push({
+          id: newId("mutation"),
+          type: "note_upsert",
+          note: {
+            id: updatedNote.id,
+            title: updatedNote.title,
+            body: updatedNote.body,
+            labelIds: updatedNote.labelIds,
+            labelNames: updatedNote.labelNames,
+            updatedAtMs: updatedNote.updatedAtMs,
+          },
+        });
+        return updatedNote;
+      }),
+    );
+    enqueueMutations([deleteMutation, ...noteMutations]);
+    if (selectedLabel === labelId) setSelectedLabel("all");
+    setNoteLabels((prev) => prev.filter((id) => id !== labelId));
+    setActiveNoteLabels((prev) => prev.filter((id) => id !== labelId));
+  };
+
+  const handleSaveNote = (e: FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    const title = noteTitle.trim();
+    const body = noteBody.trim();
+    if (!title || !body) return;
+
+    const selectedLabels = labels.filter((label) =>
+      noteLabels.includes(label.id),
+    );
+    const labelIds = selectedLabels.map((label) => label.id);
+    const labelNames = selectedLabels.map((label) => label.name);
+    const optimisticId = newId("note");
+    const now = Date.now();
+    const optimisticNote: Note = {
+      id: optimisticId,
+      title,
+      body,
+      labelIds,
+      labelNames,
+      updatedAtMs: now,
+    };
+
+    setError("");
+    setNotes((prev) => [optimisticNote, ...prev]);
+    setLoadingData(false);
+
+    setNoteTitle("");
+    setNoteBody("");
+    setNoteLabels([]);
+    setShowEditor(false);
+    enqueueMutations([
+      {
+        id: newId("mutation"),
+        type: "note_upsert",
+        note: {
+          id: optimisticId,
+          title,
+          body,
+          labelIds,
+          labelNames,
+          updatedAtMs: now,
+        },
+      },
+    ]);
+  };
+
+  const noteLabelName = getLabelTriggerText(noteLabels);
+  const activeNoteLabelName = getLabelTriggerText(activeNoteLabels);
+
+  const openNoteDialog = (note: Note) => {
+    setError("");
+    setActiveNoteId(note.id);
+    setActiveNoteTitle(note.title);
+    setActiveNoteBody(note.body);
+    setActiveNoteLabels(note.labelIds);
+    setShowNoteDialog(true);
+  };
+
+  const closeNoteDialog = () => {
+    setShowNoteDialog(false);
+    setShowNoteLabelPicker(false);
+    setActiveNoteId("");
+    setActiveNoteTitle("");
+    setActiveNoteBody("");
+    setActiveNoteLabels([]);
+  };
+
+  const handleUpdateNote = () => {
+    if (!user || !activeNoteId) return;
+    const title = activeNoteTitle.trim();
+    const body = activeNoteBody.trim();
+    if (!title || !body) {
+      setError("Title and body are required.");
+      return;
+    }
+    const now = Date.now();
+    const selectedLabels = labels.filter((label) =>
+      activeNoteLabels.includes(label.id),
+    );
+    const nextLabelIds = selectedLabels.map((label) => label.id);
+    const nextLabelNames = selectedLabels.map((label) => label.name);
+    setNotes((prev) =>
+      prev
+        .map((note) =>
+          note.id === activeNoteId
+            ? {
+                ...note,
+                title,
+                body,
+                labelIds: nextLabelIds,
+                labelNames: nextLabelNames,
+                updatedAtMs: now,
+              }
+            : note,
+        )
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs),
+    );
+    closeNoteDialog();
+    enqueueMutations([
+      {
+        id: newId("mutation"),
+        type: "note_upsert",
+        note: {
+          id: activeNoteId,
+          title,
+          body,
+          labelIds: nextLabelIds,
+          labelNames: nextLabelNames,
+          updatedAtMs: now,
+        },
+      },
+    ]);
+  };
+
+  const handleCopyNoteBody = async () => {
+    try {
+      await navigator.clipboard.writeText(activeNoteBody);
+    } catch {
+      setError("Copy failed. Clipboard permission may be blocked.");
+    }
+  };
+
+  const handleCopyNewNoteBody = async () => {
+    try {
+      await navigator.clipboard.writeText(noteBody);
+    } catch {
+      setError("Copy failed. Clipboard permission may be blocked.");
+    }
+  };
+
+  const handlePasteNewNoteBody = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setNoteBody((prev) => `${prev}${prev ? "\n" : ""}${text}`);
+    } catch {
+      setError("Paste failed. Clipboard permission may be blocked.");
+    }
+  };
+
+  const handlePasteNoteBody = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setActiveNoteBody((prev) => `${prev}${prev ? "\n" : ""}${text}`);
+    } catch {
+      setError("Paste failed. Clipboard permission may be blocked.");
+    }
+  };
+
+  const toggleId = (current: string[], id: string) =>
+    current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+
+  const openDeleteConfirm = (note: Note) => {
+    setPendingDeleteNoteId(note.id);
+    setPendingDeleteNoteTitle(note.title);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setShowDeleteConfirm(false);
+    setPendingDeleteNoteId("");
+    setPendingDeleteNoteTitle("");
+  };
+
+  const handleConfirmDeleteNote = () => {
+    if (!user || !pendingDeleteNoteId) return;
+    setNotes((prev) => prev.filter((note) => note.id !== pendingDeleteNoteId));
+    enqueueMutations([
+      {
+        id: newId("mutation"),
+        type: "note_delete",
+        noteId: pendingDeleteNoteId,
+      },
+    ]);
+    if (activeNoteId === pendingDeleteNoteId) closeNoteDialog();
+    closeDeleteConfirm();
+  };
+
+  if (!firebaseReady) {
+    return (
+      <main className="outer">
+        <section className="phone">
+          <p className="configError">
+            Firebase config missing. Add values to `.env.local` and restart.
           </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+        </section>
       </main>
-    </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <main className="outer">
+        <section className="phone">
+          <p className="loading">Loading...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="outer">
+        <section className="phone">
+          <button className="googleButton" onClick={handleSignIn} type="button">
+            <i className="fa-brands fa-google" aria-hidden="true" />
+            Sign in with Google
+          </button>
+          {error && <p className="error">{error}</p>}
+        </section>
+      </main>
+    );
+  }
+
+  if (showEditor) {
+    return (
+      <main className="outer">
+        <section className="phone">
+          <form className="editor" onSubmit={handleSaveNote}>
+            <div className="editorTop">
+              <h2>New Note</h2>
+            </div>
+            <input
+              className="titleInput"
+              placeholder="Heading"
+              value={noteTitle}
+              onChange={(e) => setNoteTitle(e.target.value)}
+            />
+            <div className="noteDialogBodyWrap editorBodyWrap">
+              <textarea
+                className="bodyInput"
+                placeholder="Lorem ipsum dolor sit amet..."
+                value={noteBody}
+                onChange={(e) => setNoteBody(e.target.value)
+                  
+                }
+              />
+              <div className="textActionButtons">
+                <button
+                  className="pasteIconButton"
+                  type="button"
+                  onClick={handlePasteNewNoteBody}
+                  aria-label="Paste note text"
+                  title="Paste text"
+                >
+                  <i className="fa-solid fa-paste" aria-hidden="true" />
+                </button>
+                <button
+                  className="copyIconButton"
+                  type="button"
+                  onClick={handleCopyNewNoteBody}
+                  aria-label="Copy note text"
+                  title="Copy text"
+                >
+                  <i className="fa-solid fa-copy" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <button
+              className="selectButton labelTriggerButton"
+              type="button"
+              onClick={() => setShowEditorLabelPicker(true)}
+            >
+              {noteLabelName}
+            </button>
+            <div className="editorBottomActions">
+              <button
+                className="cancelButton"
+                type="button"
+                onClick={() => setShowEditor(false)}
+              >
+                Cancel
+              </button>
+              <button className="saveButton" type="submit">
+                Save
+              </button>
+            </div>
+          </form>
+          {showEditorLabelPicker && (
+            <div
+              className="pickerBackdrop"
+              onClick={() => setShowEditorLabelPicker(false)}
+            >
+              <div
+                className="noteLabelPickerDialog"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="noteLabelOptions">
+                  <button
+                    className="noteLabelOption"
+                    type="button"
+                    onClick={() => setNoteLabels([])}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={noteLabels.length === 0}
+                      readOnly
+                    />
+                    <span>No label</span>
+                  </button>
+                  {labels.map((label) => (
+                    <button
+                      key={label.id}
+                      className="noteLabelOption"
+                      type="button"
+                      onClick={() => {
+                        setNoteLabels((prev) => toggleId(prev, label.id));
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={noteLabels.includes(label.id)}
+                        readOnly
+                      />
+                      <span>{label.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="noteLabelFooter">
+                  <button
+                    className="saveButton"
+                    type="button"
+                    onClick={() => setShowEditorLabelPicker(false)}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="outer">
+      <section className="phone">
+        <header className="toolbar">
+          <input
+            className="search"
+            type="search"
+            placeholder="Search notes"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button
+            className="selectButton filterButton"
+            type="button"
+            onClick={() => setShowFilterPicker(true)}
+          >
+            <i className="fa-solid fa-filter" aria-hidden="true" />
+          </button>
+          <button
+            className="manageButton"
+            onClick={() => setShowLabelManager(true)}
+            type="button"
+            aria-label="Manage labels"
+            title="Manage labels"
+          >
+            <i className="fa-solid fa-pen-to-square" aria-hidden="true" />
+          </button>
+        </header>
+
+        {loadingData ? (
+          <p className="loading">Syncing notes...</p>
+        ) : visibleNotes.length === 0 ? (
+          <div className="phoneEmptyWrap">
+            <p className="empty phoneEmpty">No notes found.</p>
+          </div>
+        ) : (
+          <div className="grid">
+            {visibleNotes.map((note) => (
+              <article
+                key={note.id}
+                className="card cardInteractive"
+                onClick={() => openNoteDialog(note)}
+              >
+                <button
+                  className="cardDeleteButton"
+                  type="button"
+                  aria-label="Delete note"
+                  title="Delete note"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openDeleteConfirm(note);
+                  }}
+                >
+                  <i className="fa-solid fa-trash" aria-hidden="true" />
+                </button>
+                <h3 title={note.title}>
+                  {note.title.length > 12
+                    ? `${note.title.slice(0, 12)}...`
+                    : note.title}
+                </h3>
+                <p>{note.body}</p>
+                <time className="cardTime">
+                  {new Date(note.updatedAtMs).toLocaleDateString()}
+                </time>
+                <footer>
+                  <div className="cardLabels">
+                    {(note.labelNames.length > 0
+                      ? note.labelNames
+                      : ["No label"]
+                    ).map((label) => (
+                      <span
+                        className="cardLabelChip"
+                        key={`${note.id}-${label}`}
+                      >
+                        <span className="cardLabelText">{label}</span>
+                      </span>
+                    ))}
+                  </div>
+                </footer>
+              </article>
+            ))}
+            {hasMoreNotes && search.trim().length === 0 && selectedLabel === "all" && (
+              <button
+                className="loadMoreButton"
+                type="button"
+                onClick={handleLoadMoreNotes}
+                disabled={loadingMoreNotes}
+              >
+                {loadingMoreNotes ? "Loading..." : "Load more"}
+              </button>
+            )}
+          </div>
+        )}
+
+        <button
+          className="fab"
+          type="button"
+          onClick={() => setShowEditor(true)}
+          aria-label="Add note"
+          title="Add note"
+        >
+          <i className="fa-solid fa-plus" aria-hidden="true" />
+        </button>
+        <button className="signOut" type="button" onClick={handleSignOut}>
+          <i className="fa-brands fa-google" aria-hidden="true" />
+          Sign out
+        </button>
+
+        {showLabelManager && (
+          <div
+            className="modalBackdrop"
+            onClick={() => setShowLabelManager(false)}
+          >
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h2>Edit label</h2>
+              <form className="modalRow" onSubmit={handleCreateLabel}>
+                <input
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="New label"
+                />
+                <button type="submit">Add</button>
+              </form>
+              <div className="labelList">
+                {displayedLabels.map((label) => (
+                  <div key={label.id} className="labelItem">
+                    <span>{label.name}</span>
+                    {label.isOptimistic ? (
+                      <button
+                        type="button"
+                        className="pendingLabelButton"
+                        disabled
+                      >
+                        Syncing
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label="Delete label"
+                        title="Delete label"
+                        onClick={() => handleDeleteLabel(label.id)}
+                      >
+                        <i className="fa-solid fa-trash" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {displayedLabels.length === 0 && (
+                  <p className="empty">No labels yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showFilterPicker && (
+          <div
+            className="pickerBackdrop"
+            onClick={() => setShowFilterPicker(false)}
+          >
+            <div className="pickerDialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Filters</h3>
+              <div className="pickerList">
+                <button
+                  className={
+                    selectedLabel === "all"
+                      ? "pickerOptionActive"
+                      : "pickerOption"
+                  }
+                  type="button"
+                  onClick={() => {
+                    setSelectedLabel("all");
+                    setShowFilterPicker(false);
+                  }}
+                >
+                  <span className="pickerLabel">All</span>
+                  <span className="pickerCount">{notes.length}</span>
+                </button>
+                {labels.map((label) => (
+                  <button
+                    key={label.id}
+                    className={
+                      selectedLabel === label.id
+                        ? "pickerOptionActive"
+                        : "pickerOption"
+                    }
+                    type="button"
+                    onClick={() => {
+                      setSelectedLabel(label.id);
+                      setShowFilterPicker(false);
+                    }}
+                  >
+                    <span className="pickerLabel">{label.name}</span>
+                    <span className="pickerCount">
+                      {labelNoteCounts[label.id] ?? 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showNoteDialog && (
+          <div className="noteDialogBackdrop" onClick={closeNoteDialog}>
+            <div className="noteDialog" onClick={(e) => e.stopPropagation()}>
+              <h2>Edit note</h2>
+              <input
+                className="titleInput"
+                value={activeNoteTitle}
+                onChange={(e) => setActiveNoteTitle(e.target.value)}
+                placeholder="Heading"
+              />
+              <div className="noteDialogBodyWrap">
+                <textarea
+                  className="noteDialogBody"
+                  value={activeNoteBody}
+                  onChange={(e) => setActiveNoteBody(e.target.value)}
+                  placeholder="Lorem ipsum dolor sit amet..."
+                />
+                <div className="textActionButtons">
+                  <button
+                    className="pasteIconButton"
+                    type="button"
+                    onClick={handlePasteNoteBody}
+                    aria-label="Paste note text"
+                    title="Paste text"
+                  >
+                    <i className="fa-solid fa-paste" aria-hidden="true" />
+                  </button>
+                  <button
+                    className="copyIconButton"
+                    type="button"
+                    onClick={handleCopyNoteBody}
+                    aria-label="Copy note text"
+                    title="Copy text"
+                  >
+                    <i className="fa-solid fa-copy" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <div className="noteDialogRow">
+                <button
+                  className="selectButton labelTriggerButton"
+                  type="button"
+                  onClick={() => setShowNoteLabelPicker(true)}
+                >
+                  {activeNoteLabelName}
+                </button>
+              </div>
+              <div className="noteDialogActions">
+                <button
+                  className="cancelButton"
+                  type="button"
+                  onClick={closeNoteDialog}
+                >
+                  Close
+                </button>
+                <button
+                  className="saveButton"
+                  type="button"
+                  onClick={handleUpdateNote}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showNoteLabelPicker && (
+          <div
+            className="pickerBackdrop"
+            onClick={() => setShowNoteLabelPicker(false)}
+          >
+            <div
+              className="noteLabelPickerDialog"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="noteLabelOptions">
+                <button
+                  className="noteLabelOption"
+                  type="button"
+                  onClick={() => setActiveNoteLabels([])}
+                >
+                  <input
+                    type="checkbox"
+                    checked={activeNoteLabels.length === 0}
+                    readOnly
+                  />
+                  <span>No label</span>
+                </button>
+                {labels.map((label) => (
+                  <button
+                    key={label.id}
+                    className="noteLabelOption"
+                    type="button"
+                    onClick={() => {
+                      setActiveNoteLabels((prev) => toggleId(prev, label.id));
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={activeNoteLabels.includes(label.id)}
+                      readOnly
+                    />
+                    <span>{label.name}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="noteLabelFooter">
+                <button
+                  className="saveButton"
+                  type="button"
+                  onClick={() => setShowNoteLabelPicker(false)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="confirmBackdrop" onClick={closeDeleteConfirm}>
+            <div className="confirmDialog" onClick={(e) => e.stopPropagation()}>
+              <h3>Delete note?</h3>
+              <p>
+                This will permanently remove{" "}
+                <strong>{pendingDeleteNoteTitle || "this note"}</strong>.
+              </p>
+              <div className="confirmActions">
+                <button
+                  className="cancelButton"
+                  type="button"
+                  onClick={closeDeleteConfirm}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="dangerButton"
+                  type="button"
+                  onClick={handleConfirmDeleteNote}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+      </section>
+    </main>
   );
 }
