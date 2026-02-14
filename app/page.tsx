@@ -41,6 +41,8 @@ const NOTES_PAGE_SIZE = 40;
 const MAX_SYNC_QUEUE_SIZE = 250;
 const BASE_SYNC_INTERVAL_MS = 1200;
 const MAX_BACKOFF_MS = 15000;
+const HIDDEN_SYNC_WARNING =
+  "Saved locally. Cloud sync will retry automatically.";
 
 type FirestoreNoteData = {
   title?: string;
@@ -169,7 +171,8 @@ export default function Home() {
       setNotesCursor(snapshot.docs.at(-1) ?? null);
       setNotes((prev) => {
         const preservedOlderNotes = prev.filter(
-          (note) => !prevFirstPageIds.has(note.id) && !nextFirstPageIds.has(note.id),
+          (note) =>
+            !prevFirstPageIds.has(note.id) && !nextFirstPageIds.has(note.id),
         );
         return applyQueueToNotes(
           [...incoming, ...preservedOlderNotes],
@@ -194,8 +197,7 @@ export default function Home() {
           next = next.filter(
             (item) =>
               !(
-                item.type === "note_upsert" &&
-                item.note.id === mutation.note.id
+                item.type === "note_upsert" && item.note.id === mutation.note.id
               ),
           );
           next.push(mutation);
@@ -216,7 +218,8 @@ export default function Home() {
           next = next.filter(
             (item) =>
               !(
-                (item.type === "note_upsert" && item.note.id === mutation.noteId) ||
+                (item.type === "note_upsert" &&
+                  item.note.id === mutation.noteId) ||
                 (item.type === "note_delete" && item.noteId === mutation.noteId)
               ),
           );
@@ -228,7 +231,8 @@ export default function Home() {
             !(
               (item.type === "label_upsert" &&
                 item.label.id === mutation.labelId) ||
-              (item.type === "label_delete" && item.labelId === mutation.labelId)
+              (item.type === "label_delete" &&
+                item.labelId === mutation.labelId)
             ),
         );
         next.push(mutation);
@@ -295,7 +299,7 @@ export default function Home() {
         MAX_BACKOFF_MS,
       );
       nextSyncAttemptAtRef.current = Date.now() + syncIntervalRef.current;
-      setError("Saved locally. Cloud sync will retry automatically.");
+      setError(HIDDEN_SYNC_WARNING);
     } finally {
       syncInFlightRef.current = false;
     }
@@ -319,7 +323,8 @@ export default function Home() {
   }, [flushQueue, syncQueue.length]);
 
   const handleLoadMoreNotes = useCallback(async () => {
-    if (!db || !user || !notesCursor || loadingMoreNotes || !hasMoreNotes) return;
+    if (!db || !user || !notesCursor || loadingMoreNotes || !hasMoreNotes)
+      return;
     setLoadingMoreNotes(true);
     try {
       const notesRef = collection(db, "users", user.uid, "notes");
@@ -471,7 +476,7 @@ export default function Home() {
     if (!user) return;
     const title = noteTitle.trim();
     const body = noteBody.trim();
-    if (!title || !body) return;
+    if (!body) return;
 
     const selectedLabels = labels.filter((label) =>
       noteLabels.includes(label.id),
@@ -538,8 +543,8 @@ export default function Home() {
     if (!user || !activeNoteId) return;
     const title = activeNoteTitle.trim();
     const body = activeNoteBody.trim();
-    if (!title || !body) {
-      setError("Title and body are required.");
+    if (!body) {
+      setError("Body is required.");
       return;
     }
     const now = Date.now();
@@ -690,18 +695,16 @@ export default function Home() {
             </div>
             <input
               className="titleInput"
-              placeholder="Heading"
+              placeholder="Add a heading"
               value={noteTitle}
               onChange={(e) => setNoteTitle(e.target.value)}
             />
             <div className="noteDialogBodyWrap editorBodyWrap">
               <textarea
                 className="bodyInput"
-                placeholder="Lorem ipsum dolor sit amet..."
+                placeholder="Take a note here"
                 value={noteBody}
-                onChange={(e) => setNoteBody(e.target.value)
-                  
-                }
+                onChange={(e) => setNoteBody(e.target.value)}
               />
               <div className="textActionButtons">
                 <button
@@ -882,16 +885,18 @@ export default function Home() {
                 </footer>
               </article>
             ))}
-            {hasMoreNotes && search.trim().length === 0 && selectedLabel === "all" && (
-              <button
-                className="loadMoreButton"
-                type="button"
-                onClick={handleLoadMoreNotes}
-                disabled={loadingMoreNotes}
-              >
-                {loadingMoreNotes ? "Loading..." : "Load more"}
-              </button>
-            )}
+            {hasMoreNotes &&
+              search.trim().length === 0 &&
+              selectedLabel === "all" && (
+                <button
+                  className="loadMoreButton"
+                  type="button"
+                  onClick={handleLoadMoreNotes}
+                  disabled={loadingMoreNotes}
+                >
+                  {loadingMoreNotes ? "Loading..." : "Load more"}
+                </button>
+              )}
           </div>
         )}
 
@@ -1152,7 +1157,9 @@ export default function Home() {
           </div>
         )}
 
-        {error && <p className="error">{error}</p>}
+        {error && error !== HIDDEN_SYNC_WARNING && (
+          <p className="error">{error}</p>
+        )}
       </section>
     </main>
   );

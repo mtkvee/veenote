@@ -347,7 +347,7 @@ textarea {
 .modal h2,
 .pickerDialog h3,
 .confirmDialog h3 {
-  font-size: 1rem;
+  font-size: 1.5rem;
 }
 
 .saveButton,
@@ -368,13 +368,13 @@ textarea {
 .bodyInput {
   border: none;
   background: transparent;
-  font-size: 0.9rem;
+  font-size: 1rem;
   padding: 0.45rem 0;
 }
 
 .titleInput::placeholder,
 .bodyInput::placeholder {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .bodyInput {
