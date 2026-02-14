@@ -372,6 +372,11 @@ textarea {
   padding: 0.45rem 0;
 }
 
+.titleInput::placeholder,
+.bodyInput::placeholder {
+  font-weight: 500;
+}
+
 .bodyInput {
   width: 100%;
   min-height: 180px;
