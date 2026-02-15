@@ -41,6 +41,7 @@ const NOTES_PAGE_SIZE = 40;
 const MAX_SYNC_QUEUE_SIZE = 250;
 const BASE_SYNC_INTERVAL_MS = 1200;
 const MAX_BACKOFF_MS = 15000;
+const MAX_HISTORY_SIZE = 200;
 const HIDDEN_SYNC_WARNING =
   "Saved locally. Cloud sync will retry automatically.";
 
@@ -53,6 +54,11 @@ type FirestoreNoteData = {
   labelName?: string;
   updatedAtMs?: number;
   updatedAt?: { toMillis: () => number };
+};
+
+type DraftHistory = {
+  title: string;
+  body: string;
 };
 
 export default function Home() {
@@ -74,6 +80,8 @@ export default function Home() {
   const [showEditor, setShowEditor] = useState(false);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [editorUndoStack, setEditorUndoStack] = useState<DraftHistory[]>([]);
+  const [editorRedoStack, setEditorRedoStack] = useState<DraftHistory[]>([]);
   const [noteLabels, setNoteLabels] = useState<string[]>([]);
   const [showEditorLabelPicker, setShowEditorLabelPicker] = useState(false);
   const [showNoteDialog, setShowNoteDialog] = useState(false);
@@ -84,6 +92,8 @@ export default function Home() {
   const [activeNoteId, setActiveNoteId] = useState("");
   const [activeNoteTitle, setActiveNoteTitle] = useState("");
   const [activeNoteBody, setActiveNoteBody] = useState("");
+  const [dialogUndoStack, setDialogUndoStack] = useState<DraftHistory[]>([]);
+  const [dialogRedoStack, setDialogRedoStack] = useState<DraftHistory[]>([]);
   const [activeNoteLabels, setActiveNoteLabels] = useState<string[]>([]);
   const [error, setError] = useState("");
   const queueRef = useRef<SyncMutation[]>([]);
@@ -501,6 +511,8 @@ export default function Home() {
     setNoteTitle("");
     setNoteBody("");
     setNoteLabels([]);
+    setEditorUndoStack([]);
+    setEditorRedoStack([]);
     setShowEditor(false);
     enqueueMutations([
       {
@@ -518,6 +530,16 @@ export default function Home() {
     ]);
   };
 
+  const handleCancelEditor = () => {
+    setNoteTitle("");
+    setNoteBody("");
+    setNoteLabels([]);
+    setEditorUndoStack([]);
+    setEditorRedoStack([]);
+    setShowEditorLabelPicker(false);
+    setShowEditor(false);
+  };
+
   const noteLabelName = getLabelTriggerText(noteLabels);
   const activeNoteLabelName = getLabelTriggerText(activeNoteLabels);
 
@@ -527,6 +549,8 @@ export default function Home() {
     setActiveNoteTitle(note.title);
     setActiveNoteBody(note.body);
     setActiveNoteLabels(note.labelIds);
+    setDialogUndoStack([]);
+    setDialogRedoStack([]);
     setShowNoteDialog(true);
   };
 
@@ -536,7 +560,137 @@ export default function Home() {
     setActiveNoteId("");
     setActiveNoteTitle("");
     setActiveNoteBody("");
+    setDialogUndoStack([]);
+    setDialogRedoStack([]);
     setActiveNoteLabels([]);
+  };
+
+  const pushHistory = (
+    stack: DraftHistory[],
+    snapshot: DraftHistory,
+  ): DraftHistory[] => {
+    const last = stack.at(-1);
+    if (last && last.title === snapshot.title && last.body === snapshot.body) {
+      return stack;
+    }
+    const next = [...stack, snapshot];
+    if (next.length > MAX_HISTORY_SIZE) {
+      next.shift();
+    }
+    return next;
+  };
+
+  const isWordBoundaryChar = (char: string | undefined) =>
+    char === undefined || /\s|[.,!?;:()[\]{}"'`~@#$%^&*+=\\/<>|-]/.test(char);
+
+  const shouldCreateWordCheckpoint = (prev: string, next: string) => {
+    if (prev === next) return false;
+    const prevLast = prev.at(-1);
+    const nextLast = next.at(-1);
+
+    if (next.length > prev.length) {
+      // Start of a new word (e.g., from empty/space/punctuation to first letter)
+      return isWordBoundaryChar(prevLast) && !isWordBoundaryChar(nextLast);
+    }
+
+    if (next.length < prev.length) {
+      // Deleting across a word boundary
+      return isWordBoundaryChar(nextLast) !== isWordBoundaryChar(prevLast);
+    }
+
+    return false;
+  };
+
+  const applyEditorChange = (
+    next: DraftHistory,
+    options?: { forceCheckpoint?: boolean },
+  ) => {
+    if (next.title === noteTitle && next.body === noteBody) return;
+
+    const titleChanged = next.title !== noteTitle;
+    const bodyChanged = next.body !== noteBody;
+    const shouldCheckpoint =
+      options?.forceCheckpoint ||
+      (titleChanged && !bodyChanged
+        ? shouldCreateWordCheckpoint(noteTitle, next.title)
+        : bodyChanged && !titleChanged
+          ? shouldCreateWordCheckpoint(noteBody, next.body)
+          : true);
+
+    if (shouldCheckpoint) {
+      setEditorUndoStack((prev) =>
+        pushHistory(prev, { title: noteTitle, body: noteBody }),
+      );
+    }
+    setEditorRedoStack([]);
+    setNoteTitle(next.title);
+    setNoteBody(next.body);
+  };
+
+  const applyDialogChange = (
+    next: DraftHistory,
+    options?: { forceCheckpoint?: boolean },
+  ) => {
+    if (next.title === activeNoteTitle && next.body === activeNoteBody) return;
+
+    const titleChanged = next.title !== activeNoteTitle;
+    const bodyChanged = next.body !== activeNoteBody;
+    const shouldCheckpoint =
+      options?.forceCheckpoint ||
+      (titleChanged && !bodyChanged
+        ? shouldCreateWordCheckpoint(activeNoteTitle, next.title)
+        : bodyChanged && !titleChanged
+          ? shouldCreateWordCheckpoint(activeNoteBody, next.body)
+          : true);
+
+    if (shouldCheckpoint) {
+      setDialogUndoStack((prev) =>
+        pushHistory(prev, { title: activeNoteTitle, body: activeNoteBody }),
+      );
+    }
+    setDialogRedoStack([]);
+    setActiveNoteTitle(next.title);
+    setActiveNoteBody(next.body);
+  };
+
+  const handleEditorUndo = () => {
+    if (editorUndoStack.length === 0) return;
+    const current = { title: noteTitle, body: noteBody };
+    const previous = editorUndoStack[editorUndoStack.length - 1];
+    setEditorUndoStack((prev) => prev.slice(0, -1));
+    setEditorRedoStack((prev) => pushHistory(prev, current));
+    setNoteTitle(previous.title);
+    setNoteBody(previous.body);
+  };
+
+  const handleEditorRedo = () => {
+    if (editorRedoStack.length === 0) return;
+    const current = { title: noteTitle, body: noteBody };
+    const next = editorRedoStack[editorRedoStack.length - 1];
+    setEditorRedoStack((prev) => prev.slice(0, -1));
+    setEditorUndoStack((prev) => pushHistory(prev, current));
+    setNoteTitle(next.title);
+    setNoteBody(next.body);
+  };
+
+  const handleDialogUndo = () => {
+    if (dialogUndoStack.length === 0) return;
+    const current = { title: activeNoteTitle, body: activeNoteBody };
+    const previous = dialogUndoStack[dialogUndoStack.length - 1];
+    setDialogUndoStack((prev) => prev.slice(0, -1));
+    setDialogRedoStack((prev) => pushHistory(prev, current));
+    setActiveNoteTitle(previous.title);
+    setActiveNoteBody(previous.body);
+  };
+
+  const handleDialogRedo = () => {
+    if (dialogRedoStack.length === 0) return;
+    const current = { title: activeNoteTitle, body: activeNoteBody };
+    const next = dialogRedoStack[dialogRedoStack.length - 1];
+    setDialogRedoStack((prev) => prev.slice(0, -1));
+    setDialogUndoStack((prev) => pushHistory(prev, current));
+    setActiveNoteTitle(next.title);
+    setActiveNoteBody(next.body);
   };
 
   const handleUpdateNote = () => {
@@ -586,17 +740,9 @@ export default function Home() {
     ]);
   };
 
-  const handleCopyNoteBody = async () => {
+  const handleCopyCardBody = async (body: string) => {
     try {
-      await navigator.clipboard.writeText(activeNoteBody);
-    } catch {
-      setError("Copy failed. Clipboard permission may be blocked.");
-    }
-  };
-
-  const handleCopyNewNoteBody = async () => {
-    try {
-      await navigator.clipboard.writeText(noteBody);
+      await navigator.clipboard.writeText(body);
     } catch {
       setError("Copy failed. Clipboard permission may be blocked.");
     }
@@ -605,7 +751,10 @@ export default function Home() {
   const handlePasteNewNoteBody = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      setNoteBody((prev) => `${prev}${prev ? "\n" : ""}${text}`);
+      applyEditorChange({
+        title: noteTitle,
+        body: `${noteBody}${noteBody ? "\n" : ""}${text}`,
+      }, { forceCheckpoint: true });
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -614,7 +763,10 @@ export default function Home() {
   const handlePasteNoteBody = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      setActiveNoteBody((prev) => `${prev}${prev ? "\n" : ""}${text}`);
+      applyDialogChange({
+        title: activeNoteTitle,
+        body: `${activeNoteBody}${activeNoteBody ? "\n" : ""}${text}`,
+      }, { forceCheckpoint: true });
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -627,6 +779,21 @@ export default function Home() {
     setPendingDeleteNoteId(note.id);
     setPendingDeleteNoteTitle(note.title);
     setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteFromNoteDialog = () => {
+    if (!activeNoteId) return;
+    const selectedLabels = labels.filter((label) =>
+      activeNoteLabels.includes(label.id),
+    );
+    openDeleteConfirm({
+      id: activeNoteId,
+      title: activeNoteTitle,
+      body: activeNoteBody,
+      labelIds: selectedLabels.map((label) => label.id),
+      labelNames: selectedLabels.map((label) => label.name),
+      updatedAtMs: Date.now(),
+    });
   };
 
   const closeDeleteConfirm = () => {
@@ -689,64 +856,93 @@ export default function Home() {
     return (
       <main className="outer">
         <section className="phone">
-          <form className="editor" onSubmit={handleSaveNote}>
-            <div className="editorTop">
-              <h2>New Note</h2>
-            </div>
-            <input
-              className="titleInput"
-              placeholder="Add a heading"
-              value={noteTitle}
-              onChange={(e) => setNoteTitle(e.target.value)}
-            />
-            <div className="noteDialogBodyWrap editorBodyWrap">
-              <textarea
-                className="bodyInput"
-                placeholder="Take a note here"
-                value={noteBody}
-                onChange={(e) => setNoteBody(e.target.value)}
-              />
-              <div className="textActionButtons">
-                <button
-                  className="pasteIconButton"
-                  type="button"
-                  onClick={handlePasteNewNoteBody}
-                  aria-label="Paste note text"
-                  title="Paste text"
-                >
-                  <i className="fa-solid fa-paste" aria-hidden="true" />
-                </button>
-                <button
-                  className="copyIconButton"
-                  type="button"
-                  onClick={handleCopyNewNoteBody}
-                  aria-label="Copy note text"
-                  title="Copy text"
-                >
-                  <i className="fa-solid fa-copy" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            <button
-              className="selectButton labelTriggerButton"
-              type="button"
-              onClick={() => setShowEditorLabelPicker(true)}
+          <div className="noteDialogBackdrop" onClick={handleCancelEditor}>
+            <form
+              className="noteDialog"
+              onSubmit={handleSaveNote}
+              onClick={(e) => e.stopPropagation()}
             >
-              {noteLabelName}
-            </button>
-            <div className="editorBottomActions">
+              <input
+                className="titleInput"
+                placeholder="Title"
+                value={noteTitle}
+                onChange={(e) =>
+                  applyEditorChange({
+                    title: e.target.value,
+                    body: noteBody,
+                  })
+                }
+              />
+              <div className="editorBodyWrap">
+                <textarea
+                  className="bodyInput"
+                  placeholder="Note"
+                  value={noteBody}
+                  onChange={(e) =>
+                    applyEditorChange({
+                      title: noteTitle,
+                      body: e.target.value,
+                    })
+                  }
+                />
+              </div>
               <button
-                className="cancelButton"
+                className="selectButton labelTriggerButton"
                 type="button"
-                onClick={() => setShowEditor(false)}
+                onClick={() => setShowEditorLabelPicker(true)}
               >
-                Cancel
+                {noteLabelName}
               </button>
-              <button className="saveButton" type="submit">
-                Save
-              </button>
-            </div>
-          </form>
+              <div className="dialogBottomActions">
+                <div className="textActionButtons">
+                  <button
+                    className="pasteIconButton"
+                    type="button"
+                    onClick={handlePasteNewNoteBody}
+                    aria-label="Paste note text"
+                    title="Paste text"
+                  >
+                    <i className="fa-solid fa-paste" aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="editorBottomActions">
+                  <button
+                    className="historyIconButton"
+                    type="button"
+                    onClick={handleEditorUndo}
+                    aria-label="Undo"
+                    title="Undo"
+                    disabled={editorUndoStack.length === 0}
+                  >
+                    <i className="fa-solid fa-rotate-left" aria-hidden="true" />
+                  </button>
+                  <button
+                    className="historyIconButton"
+                    type="button"
+                    onClick={handleEditorRedo}
+                    aria-label="Redo"
+                    title="Redo"
+                    disabled={editorRedoStack.length === 0}
+                  >
+                    <i
+                      className="fa-solid fa-rotate-right"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    className="cancelButton"
+                    type="button"
+                    onClick={handleCancelEditor}
+                  >
+                    Cancel
+                  </button>
+                  <button className="saveButton" type="submit">
+                    Save
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
           {showEditorLabelPicker && (
             <div
               className="pickerBackdrop"
@@ -848,16 +1044,16 @@ export default function Home() {
                 onClick={() => openNoteDialog(note)}
               >
                 <button
-                  className="cardDeleteButton"
+                  className="cardCopyButton"
                   type="button"
-                  aria-label="Delete note"
-                  title="Delete note"
+                  aria-label="Copy note text"
+                  title="Copy text"
                   onClick={(e) => {
                     e.stopPropagation();
-                    openDeleteConfirm(note);
+                    void handleCopyCardBody(note.body);
                   }}
                 >
-                  <i className="fa-solid fa-trash" aria-hidden="true" />
+                  <i className="fa-solid fa-copy" aria-hidden="true" />
                 </button>
                 <h3 title={note.title}>
                   {note.title.length > 12
@@ -868,21 +1064,20 @@ export default function Home() {
                 <time className="cardTime">
                   {new Date(note.updatedAtMs).toLocaleDateString()}
                 </time>
-                <footer>
-                  <div className="cardLabels">
-                    {(note.labelNames.length > 0
-                      ? note.labelNames
-                      : ["No label"]
-                    ).map((label) => (
-                      <span
-                        className="cardLabelChip"
-                        key={`${note.id}-${label}`}
-                      >
-                        <span className="cardLabelText">{label}</span>
-                      </span>
-                    ))}
-                  </div>
-                </footer>
+                {note.labelNames.length > 0 && (
+                  <footer>
+                    <div className="cardLabels">
+                      {note.labelNames.map((label) => (
+                        <span
+                          className="cardLabelChip"
+                          key={`${note.id}-${label}`}
+                        >
+                          <span className="cardLabelText">{label}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </footer>
+                )}
               </article>
             ))}
             {hasMoreNotes &&
@@ -903,7 +1098,11 @@ export default function Home() {
         <button
           className="fab"
           type="button"
-          onClick={() => setShowEditor(true)}
+          onClick={() => {
+            setEditorUndoStack([]);
+            setEditorRedoStack([]);
+            setShowEditor(true);
+          }}
           aria-label="Add note"
           title="Add note"
         >
@@ -920,7 +1119,6 @@ export default function Home() {
             onClick={() => setShowLabelManager(false)}
           >
             <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h2>Edit label</h2>
               <form className="modalRow" onSubmit={handleCreateLabel}>
                 <input
                   value={newLabel}
@@ -953,9 +1151,6 @@ export default function Home() {
                     )}
                   </div>
                 ))}
-                {displayedLabels.length === 0 && (
-                  <p className="empty">No labels yet.</p>
-                )}
               </div>
             </div>
           </div>
@@ -967,7 +1162,6 @@ export default function Home() {
             onClick={() => setShowFilterPicker(false)}
           >
             <div className="pickerDialog" onClick={(e) => e.stopPropagation()}>
-              <h3>Filters</h3>
               <div className="pickerList">
                 <button
                   className={
@@ -1012,21 +1206,48 @@ export default function Home() {
         {showNoteDialog && (
           <div className="noteDialogBackdrop" onClick={closeNoteDialog}>
             <div className="noteDialog" onClick={(e) => e.stopPropagation()}>
-              <h2>Edit note</h2>
               <input
                 className="titleInput"
                 value={activeNoteTitle}
-                onChange={(e) => setActiveNoteTitle(e.target.value)}
-                placeholder="Heading"
+                onChange={(e) =>
+                  applyDialogChange({
+                    title: e.target.value,
+                    body: activeNoteBody,
+                  })
+                }
+                placeholder="Title"
               />
-              <div className="noteDialogBodyWrap">
+              <div className="editorBodyWrap">
                 <textarea
-                  className="noteDialogBody"
+                  className="bodyInput"
                   value={activeNoteBody}
-                  onChange={(e) => setActiveNoteBody(e.target.value)}
-                  placeholder="Lorem ipsum dolor sit amet..."
+                  onChange={(e) =>
+                    applyDialogChange({
+                      title: activeNoteTitle,
+                      body: e.target.value,
+                    })
+                  }
+                  placeholder="Note"
                 />
+              </div>
+              <button
+                className="selectButton labelTriggerButton"
+                type="button"
+                onClick={() => setShowNoteLabelPicker(true)}
+              >
+                {activeNoteLabelName}
+              </button>
+              <div className="dialogBottomActions">
                 <div className="textActionButtons">
+                  <button
+                    className="noteDialogDeleteButton"
+                    type="button"
+                    onClick={handleDeleteFromNoteDialog}
+                    aria-label="Delete note"
+                    title="Delete note"
+                  >
+                    <i className="fa-solid fa-trash" aria-hidden="true" />
+                  </button>
                   <button
                     className="pasteIconButton"
                     type="button"
@@ -1036,41 +1257,46 @@ export default function Home() {
                   >
                     <i className="fa-solid fa-paste" aria-hidden="true" />
                   </button>
+                </div>
+                <div className="editorBottomActions">
                   <button
-                    className="copyIconButton"
+                    className="historyIconButton"
                     type="button"
-                    onClick={handleCopyNoteBody}
-                    aria-label="Copy note text"
-                    title="Copy text"
+                    onClick={handleDialogUndo}
+                    aria-label="Undo"
+                    title="Undo"
+                    disabled={dialogUndoStack.length === 0}
                   >
-                    <i className="fa-solid fa-copy" aria-hidden="true" />
+                    <i className="fa-solid fa-rotate-left" aria-hidden="true" />
+                  </button>
+                  <button
+                    className="historyIconButton"
+                    type="button"
+                    onClick={handleDialogRedo}
+                    aria-label="Redo"
+                    title="Redo"
+                    disabled={dialogRedoStack.length === 0}
+                  >
+                    <i
+                      className="fa-solid fa-rotate-right"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    className="cancelButton"
+                    type="button"
+                    onClick={closeNoteDialog}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="saveButton"
+                    type="button"
+                    onClick={handleUpdateNote}
+                  >
+                    Save
                   </button>
                 </div>
-              </div>
-              <div className="noteDialogRow">
-                <button
-                  className="selectButton labelTriggerButton"
-                  type="button"
-                  onClick={() => setShowNoteLabelPicker(true)}
-                >
-                  {activeNoteLabelName}
-                </button>
-              </div>
-              <div className="noteDialogActions">
-                <button
-                  className="cancelButton"
-                  type="button"
-                  onClick={closeNoteDialog}
-                >
-                  Close
-                </button>
-                <button
-                  className="saveButton"
-                  type="button"
-                  onClick={handleUpdateNote}
-                >
-                  Save
-                </button>
               </div>
             </div>
           </div>
