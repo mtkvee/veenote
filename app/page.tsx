@@ -102,13 +102,18 @@ export default function Home() {
   const syncIntervalRef = useRef(BASE_SYNC_INTERVAL_MS);
   const firstPageNoteIdsRef = useRef<Set<string>>(new Set());
 
-  const getLabelTriggerText = (selectedIds: string[]) => {
-    if (selectedIds.length === 0) return "Add label";
-    return labels
-      .filter((label) => selectedIds.includes(label.id))
-      .map((label) => label.name)
-      .join(", ");
-  };
+  const displayedLabels = useMemo(
+    () => labels.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [labels],
+  );
+
+  const getSelectedLabelNames = useCallback(
+    (selectedIds: string[]) =>
+      displayedLabels
+        .filter((label) => selectedIds.includes(label.id))
+        .map((label) => label.name),
+    [displayedLabels],
+  );
 
   useEffect(() => {
     if (!firebaseReady || !auth) return;
@@ -390,11 +395,6 @@ export default function Home() {
     return counts;
   }, [notes]);
 
-  const displayedLabels = useMemo(
-    () => labels.slice().sort((a, b) => a.name.localeCompare(b.name)),
-    [labels],
-  );
-
   const handleSignIn = async () => {
     if (!auth) return;
     setError("");
@@ -488,7 +488,7 @@ export default function Home() {
     const body = noteBody.trim();
     if (!body) return;
 
-    const selectedLabels = labels.filter((label) =>
+    const selectedLabels = displayedLabels.filter((label) =>
       noteLabels.includes(label.id),
     );
     const labelIds = selectedLabels.map((label) => label.id);
@@ -540,8 +540,8 @@ export default function Home() {
     setShowEditor(false);
   };
 
-  const noteLabelName = getLabelTriggerText(noteLabels);
-  const activeNoteLabelName = getLabelTriggerText(activeNoteLabels);
+  const noteLabelNames = getSelectedLabelNames(noteLabels);
+  const activeNoteLabelNames = getSelectedLabelNames(activeNoteLabels);
 
   const openNoteDialog = (note: Note) => {
     setError("");
@@ -702,7 +702,7 @@ export default function Home() {
       return;
     }
     const now = Date.now();
-    const selectedLabels = labels.filter((label) =>
+    const selectedLabels = displayedLabels.filter((label) =>
       activeNoteLabels.includes(label.id),
     );
     const nextLabelIds = selectedLabels.map((label) => label.id);
@@ -783,7 +783,7 @@ export default function Home() {
 
   const handleDeleteFromNoteDialog = () => {
     if (!activeNoteId) return;
-    const selectedLabels = labels.filter((label) =>
+    const selectedLabels = displayedLabels.filter((label) =>
       activeNoteLabels.includes(label.id),
     );
     openDeleteConfirm({
@@ -886,13 +886,25 @@ export default function Home() {
                   }
                 />
               </div>
-              <button
-                className="selectButton labelTriggerButton"
-                type="button"
-                onClick={() => setShowEditorLabelPicker(true)}
-              >
-                {noteLabelName}
-              </button>
+              <div className="labelTriggerGroup">
+                <button
+                  className="selectButton labelTriggerButton"
+                  type="button"
+                  onClick={() => setShowEditorLabelPicker(true)}
+                >
+                  Add label
+                </button>
+                {noteLabelNames.map((labelName, index) => (
+                  <button
+                    key={`${labelName}-${index}`}
+                    className="selectButton labelTriggerButton"
+                    type="button"
+                    onClick={() => setShowEditorLabelPicker(true)}
+                  >
+                    {labelName}
+                  </button>
+                ))}
+              </div>
               <div className="dialogBottomActions">
                 <div className="textActionButtons">
                   <button
@@ -965,7 +977,7 @@ export default function Home() {
                     />
                     <span>No label</span>
                   </button>
-                  {labels.map((label) => (
+                  {displayedLabels.map((label) => (
                     <button
                       key={label.id}
                       className="noteLabelOption"
@@ -1067,7 +1079,10 @@ export default function Home() {
                 {note.labelNames.length > 0 && (
                   <footer>
                     <div className="cardLabels">
-                      {note.labelNames.map((label) => (
+                      {note.labelNames
+                        .slice()
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((label) => (
                         <span
                           className="cardLabelChip"
                           key={`${note.id}-${label}`}
@@ -1178,7 +1193,7 @@ export default function Home() {
                   <span className="pickerLabel">All</span>
                   <span className="pickerCount">{notes.length}</span>
                 </button>
-                {labels.map((label) => (
+                {displayedLabels.map((label) => (
                   <button
                     key={label.id}
                     className={
@@ -1230,13 +1245,25 @@ export default function Home() {
                   placeholder="Note"
                 />
               </div>
-              <button
-                className="selectButton labelTriggerButton"
-                type="button"
-                onClick={() => setShowNoteLabelPicker(true)}
-              >
-                {activeNoteLabelName}
-              </button>
+              <div className="labelTriggerGroup">
+                <button
+                  className="selectButton labelTriggerButton"
+                  type="button"
+                  onClick={() => setShowNoteLabelPicker(true)}
+                >
+                  Add label
+                </button>
+                {activeNoteLabelNames.map((labelName, index) => (
+                  <button
+                    key={`${labelName}-${index}`}
+                    className="selectButton labelTriggerButton"
+                    type="button"
+                    onClick={() => setShowNoteLabelPicker(true)}
+                  >
+                    {labelName}
+                  </button>
+                ))}
+              </div>
               <div className="dialogBottomActions">
                 <div className="textActionButtons">
                   <button
@@ -1324,7 +1351,7 @@ export default function Home() {
                   />
                   <span>No label</span>
                 </button>
-                {labels.map((label) => (
+                {displayedLabels.map((label) => (
                   <button
                     key={label.id}
                     className="noteLabelOption"
