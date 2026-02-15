@@ -983,7 +983,7 @@ textarea {
 
 @media (max-width: 480px) {
   .outer {
-    padding: 0.8rem;
+    padding: 0.8rem 1rem;
   }
 
   .phone {
