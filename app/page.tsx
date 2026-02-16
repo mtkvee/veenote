@@ -89,11 +89,12 @@ function GoogleLogoIcon() {
 }
 
 type LabelTriggerGroupProps = {
-  labelNames: string[];
+  labels: Array<{ id: string; name: string }>;
   onOpen: () => void;
+  onRemove: (id: string) => void;
 };
 
-function LabelTriggerGroup({ labelNames, onOpen }: LabelTriggerGroupProps) {
+function LabelTriggerGroup({ labels, onOpen, onRemove }: LabelTriggerGroupProps) {
   return (
     <div className="labelTriggerGroup">
       <button
@@ -103,14 +104,50 @@ function LabelTriggerGroup({ labelNames, onOpen }: LabelTriggerGroupProps) {
       >
         Add label
       </button>
-      {labelNames.map((labelName, index) => (
+      {labels.map((label) => (
         <button
-          key={`${labelName}-${index}`}
+          key={label.id}
           className="selectButton labelTriggerButton"
           type="button"
           onClick={onOpen}
         >
-          {labelName}
+          <span className="labelTriggerText">{label.name}</span>
+          <span
+            className="labelTriggerRemove"
+            role="button"
+            tabIndex={0}
+            aria-label={`Remove ${label.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              const target = event.currentTarget;
+              if (target) {
+                target.classList.add("labelTriggerRemoveActive");
+                window.setTimeout(() => {
+                  onRemove(label.id);
+                }, 160);
+                return;
+              }
+              onRemove(label.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.stopPropagation();
+                event.preventDefault();
+                const target = event.currentTarget;
+                if (target) {
+                  target.classList.add("labelTriggerRemoveActive");
+                  window.setTimeout(() => {
+                    onRemove(label.id);
+                  }, 160);
+                  return;
+                }
+                onRemove(label.id);
+              }
+            }}
+          >
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </span>
         </button>
       ))}
     </div>
@@ -310,12 +347,6 @@ export default function Home() {
       return displayedLabels.filter((label) => selectedIdSet.has(label.id));
     },
     [displayedLabels],
-  );
-
-  const getSelectedLabelNames = useCallback(
-    (selectedIds: string[]) =>
-      getSelectedLabels(selectedIds).map((label) => label.name),
-    [getSelectedLabels],
   );
 
   const resetNewNoteDraft = useCallback(() => {
@@ -789,8 +820,8 @@ export default function Home() {
     setShowEditor(false);
   };
 
-  const noteLabelNames = getSelectedLabelNames(noteLabels);
-  const activeNoteLabelNames = getSelectedLabelNames(activeNoteLabels);
+  const noteLabelItems = getSelectedLabels(noteLabels);
+  const activeNoteLabelItems = getSelectedLabels(activeNoteLabels);
 
   const openNoteDialog = (note: Note) => {
     setError("");
@@ -1162,8 +1193,11 @@ export default function Home() {
                 />
               </div>
               <LabelTriggerGroup
-                labelNames={noteLabelNames}
+                labels={noteLabelItems}
                 onOpen={() => setShowEditorLabelPicker(true)}
+                onRemove={(id) => {
+                  setNoteLabels((prev) => prev.filter((labelId) => labelId !== id));
+                }}
               />
               <div className="dialogBottomActions">
                 <div className="textActionButtons">
@@ -1419,8 +1453,13 @@ export default function Home() {
                 />
               </div>
               <LabelTriggerGroup
-                labelNames={activeNoteLabelNames}
+                labels={activeNoteLabelItems}
                 onOpen={() => setShowNoteLabelPicker(true)}
+                onRemove={(id) => {
+                  setActiveNoteLabels((prev) =>
+                    prev.filter((labelId) => labelId !== id),
+                  );
+                }}
               />
               <div className="dialogBottomActions">
                 <div className="textActionButtons">

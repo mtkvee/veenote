@@ -73,7 +73,7 @@
 .phone input::placeholder,
 .phone textarea::placeholder {
   color: #505050;
-  font-size: var(--fs-body);
+  font-size: inherit;
   opacity: 1;
 }
 
@@ -211,8 +211,11 @@
   background: none;
   color: #505050;
   min-height: 30px;
-  padding: 0 0.8rem;
+  padding: 0 0.7rem;
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .labelTriggerGroup {
@@ -222,8 +225,30 @@
   margin: 0.5rem 0;
 }
 
-.labelTriggerButton:hover {
-  background: #e9e9e9 !important;
+.labelTriggerText {
+  line-height: 1;
+}
+
+.labelTriggerRemove {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #6b7280;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.labelTriggerRemoveActive {
+  transform: scale(0.85);
+  opacity: 0.7;
 }
 
 .filterButton {
@@ -301,7 +326,7 @@
   position: relative;
   border-radius: 20px;
   background: var(--ui-bg);
-  min-height: 10.1875rem;
+  min-height: 11.1875rem;
   overflow: hidden;
   padding: 0.85rem;
   display: flex;
@@ -509,7 +534,7 @@ textarea {
 
 .titleInput::placeholder {
   font-weight: 600;
-  font-size: 1.35rem;
+  font-size: 1.5rem !important;
 }
 
 .bodyInput {
@@ -517,7 +542,7 @@ textarea {
   min-height: 180px;
   display: block;
   border-bottom: none;
-  resize: vertical;
+  resize: none;
   font-size: 1rem;
   overflow-x: hidden;
   overflow-y: auto;
@@ -528,7 +553,7 @@ textarea {
 }
 
 .bodyInput::placeholder {
-  font-size: 1rem;
+  font-size: 1rem !important;
 }
 
 .editorBodyWrap {
@@ -854,7 +879,6 @@ textarea {
 
 .noteDialog .selectButton {
   width: fit-content;
-  padding: 0.5rem;
   font-size: 0.75rem;
 }
 
