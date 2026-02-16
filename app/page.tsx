@@ -355,6 +355,16 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!authLoading) return;
+    const timer = window.setTimeout(() => {
+      setAuthLoading(false);
+    }, 750);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [authLoading]);
+
+  useEffect(() => {
     queueRef.current = syncQueue;
     if (user) saveQueue(user.uid, syncQueue);
   }, [syncQueue, user]);
