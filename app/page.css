@@ -301,7 +301,7 @@
   position: relative;
   border-radius: 20px;
   background: var(--ui-bg);
-  min-height: 165px;
+  min-height: 163px;
   overflow: hidden;
   padding: 0.85rem;
   display: flex;
