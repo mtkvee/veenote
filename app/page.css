@@ -497,7 +497,7 @@ textarea {
 
 .titleInput {
   font-weight: 600;
-  font-size: 18px !important;
+  font-size: 1rem;
 }
 
 .titleInput,
@@ -509,7 +509,7 @@ textarea {
 
 .titleInput::placeholder {
   font-weight: 600;
-  font-size: 18px !important;
+  font-size: 1rem;
 }
 
 .bodyInput {
@@ -518,13 +518,17 @@ textarea {
   display: block;
   border-bottom: none;
   resize: vertical;
-  font-size: var(--fs-body);
+  font-size: 1rem;
   overflow-x: hidden;
   overflow-y: auto;
   overflow-wrap: anywhere;
   line-height: 1.35;
   padding: 0;
   scrollbar-width: none;
+}
+
+.bodyInput::placeholder {
+  font-size: 1rem;
 }
 
 .editorBodyWrap {
@@ -1052,6 +1056,10 @@ textarea {
 .selectButton:focus,
 .modalRow input:focus {
   outline: none;
+}
+.search:focus,
+.selectButton:focus,
+.modalRow input:focus {
   box-shadow: 0 0 1px #737373;
 }
 
