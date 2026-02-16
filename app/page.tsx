@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, UIEvent } from "react";
+import Image from "next/image";
 import {
   User,
-  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import {
@@ -61,6 +60,196 @@ type DraftHistory = {
   body: string;
 };
 
+function GoogleLogoIcon() {
+  return (
+    <svg
+      className="googleLogoIcon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3.01h3.86c2.26-2.08 3.57-5.14 3.57-8.66Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.86-3.01c-1.07.72-2.44 1.15-4.09 1.15-3.14 0-5.79-2.12-6.74-4.97H1.28v3.1A12 12 0 0 0 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.26 14.26A7.2 7.2 0 0 1 4.89 12c0-.79.14-1.55.37-2.26v-3.1H1.28A12 12 0 0 0 0 12c0 1.93.46 3.75 1.28 5.36l3.98-3.1Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.77c1.76 0 3.34.61 4.58 1.81l3.44-3.44C17.95 1.2 15.23 0 12 0 7.31 0 3.25 2.69 1.28 6.64l3.98 3.1c.95-2.85 3.6-4.97 6.74-4.97Z"
+      />
+    </svg>
+  );
+}
+
+type LabelTriggerGroupProps = {
+  labelNames: string[];
+  onOpen: () => void;
+};
+
+function LabelTriggerGroup({ labelNames, onOpen }: LabelTriggerGroupProps) {
+  return (
+    <div className="labelTriggerGroup">
+      <button
+        className="selectButton labelTriggerButton"
+        type="button"
+        onClick={onOpen}
+      >
+        Add label
+      </button>
+      {labelNames.map((labelName, index) => (
+        <button
+          key={`${labelName}-${index}`}
+          className="selectButton labelTriggerButton"
+          type="button"
+          onClick={onOpen}
+        >
+          {labelName}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type NoteLabelPickerDialogProps = {
+  open: boolean;
+  labels: Label[];
+  selectedIds: string[];
+  namePrefix: string;
+  onToggle: (id: string) => void;
+  onClose: () => void;
+};
+
+function NoteLabelPickerDialog({
+  open,
+  labels,
+  selectedIds,
+  namePrefix,
+  onToggle,
+  onClose,
+}: NoteLabelPickerDialogProps) {
+  if (!open) return null;
+
+  return (
+    <div className="pickerBackdrop noteLabelPickerBackdrop" onClick={onClose}>
+      <div className="noteLabelPickerDialog" onClick={(e) => e.stopPropagation()}>
+        <div className="noteLabelOptions">
+          {labels.map((label) => (
+            <button
+              key={label.id}
+              className="noteLabelOption"
+              type="button"
+              onClick={() => onToggle(label.id)}
+            >
+              <input
+                type="checkbox"
+                name={`${namePrefix}_${label.id}`}
+                checked={selectedIds.includes(label.id)}
+                readOnly
+              />
+              <span>{label.name}</span>
+            </button>
+          ))}
+        </div>
+        <div className="noteLabelFooter">
+          <button className="saveButton" type="button" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type NotesGridProps = {
+  visibleNotes: Note[];
+  hasMoreNotes: boolean;
+  loadingMoreNotes: boolean;
+  search: string;
+  selectedLabel: string;
+  onOpenNote: (note: Note) => void;
+  onCopyCardBody: (body: string) => Promise<void>;
+  onLoadMoreNotes: () => void;
+  onScroll: (event: UIEvent<HTMLDivElement>) => void;
+};
+
+function NotesGrid({
+  visibleNotes,
+  hasMoreNotes,
+  loadingMoreNotes,
+  search,
+  selectedLabel,
+  onOpenNote,
+  onCopyCardBody,
+  onLoadMoreNotes,
+  onScroll,
+}: NotesGridProps) {
+  const shouldShowLoadMore =
+    hasMoreNotes && search.trim().length === 0 && selectedLabel === "all";
+
+  return (
+    <div className="grid" onScroll={onScroll}>
+      {visibleNotes.map((note) => (
+        <article
+          key={note.id}
+          className="card cardInteractive"
+          onClick={() => onOpenNote(note)}
+        >
+          <button
+            className="cardCopyButton"
+            type="button"
+            aria-label="Copy note text"
+            title="Copy text"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onCopyCardBody(note.body);
+            }}
+          >
+            <i className="fa-solid fa-copy" aria-hidden="true" />
+          </button>
+          <h3 title={note.title}>
+            {note.title.length > 12 ? `${note.title.slice(0, 12)}...` : note.title}
+          </h3>
+          <p>{note.body}</p>
+          <time className="cardTime">
+            {new Date(note.updatedAtMs).toLocaleDateString()}
+          </time>
+          {note.labelNames.length > 0 && (
+            <footer>
+              <div className="cardLabels">
+                {note.labelNames
+                  .slice()
+                  .sort((a, b) => a.localeCompare(b))
+                  .map((label) => (
+                    <span className="cardLabelChip" key={`${note.id}-${label}`}>
+                      <span className="cardLabelText">{label}</span>
+                    </span>
+                  ))}
+              </div>
+            </footer>
+          )}
+        </article>
+      ))}
+      {shouldShowLoadMore && (
+        <button
+          className="loadMoreButton"
+          type="button"
+          onClick={onLoadMoreNotes}
+          disabled={loadingMoreNotes}
+        >
+          {loadingMoreNotes ? "Loading..." : "Load more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [authLoading, setAuthLoading] = useState(firebaseReady);
   const [user, setUser] = useState<User | null>(null);
@@ -96,31 +285,49 @@ export default function Home() {
   const [dialogRedoStack, setDialogRedoStack] = useState<DraftHistory[]>([]);
   const [activeNoteLabels, setActiveNoteLabels] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [isNotesListAtTop, setIsNotesListAtTop] = useState(true);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const queueRef = useRef<SyncMutation[]>([]);
   const syncInFlightRef = useRef(false);
   const nextSyncAttemptAtRef = useRef(0);
   const syncIntervalRef = useRef(BASE_SYNC_INTERVAL_MS);
   const firstPageNoteIdsRef = useRef<Set<string>>(new Set());
+  const hasMainOverlayOpen =
+    showLabelManager ||
+    showFilterPicker ||
+    showNoteDialog ||
+    showNoteLabelPicker ||
+    showDeleteConfirm;
 
   const displayedLabels = useMemo(
     () => labels.slice().sort((a, b) => a.name.localeCompare(b.name)),
     [labels],
   );
 
-  const getSelectedLabelNames = useCallback(
-    (selectedIds: string[]) =>
-      displayedLabels
-        .filter((label) => selectedIds.includes(label.id))
-        .map((label) => label.name),
+  const getSelectedLabels = useCallback(
+    (selectedIds: string[]) => {
+      const selectedIdSet = new Set(selectedIds);
+      return displayedLabels.filter((label) => selectedIdSet.has(label.id));
+    },
     [displayedLabels],
   );
 
+  const getSelectedLabelNames = useCallback(
+    (selectedIds: string[]) =>
+      getSelectedLabels(selectedIds).map((label) => label.name),
+    [getSelectedLabels],
+  );
+
+  const resetNewNoteDraft = useCallback(() => {
+    setNoteTitle("");
+    setNoteBody("");
+    setNoteLabels([]);
+    setEditorUndoStack([]);
+    setEditorRedoStack([]);
+  }, []);
+
   useEffect(() => {
     if (!firebaseReady || !auth) return;
-
-    getRedirectResult(auth).catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : "Sign-in redirect failed.");
-    });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -163,7 +370,6 @@ export default function Home() {
         const data = docItem.data() as { name?: string };
         return { id: docItem.id, name: data.name ?? "" };
       });
-      incoming.sort((a, b) => a.name.localeCompare(b.name));
       setLabels(applyQueueToLabels(incoming, queueRef.current));
     });
 
@@ -337,6 +543,31 @@ export default function Home() {
     };
   }, [flushQueue, syncQueue.length]);
 
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!search.trim()) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (searchInputRef.current?.contains(target)) return;
+
+      const element = target instanceof Element ? target : null;
+      if (
+        element?.closest(
+          "button, a, input, textarea, select, label, [role='button']",
+        )
+      ) {
+        return;
+      }
+
+      setSearch("");
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [search]);
+
   const handleLoadMoreNotes = useCallback(async () => {
     if (!db || !user || !notesCursor || loadingMoreNotes || !hasMoreNotes)
       return;
@@ -368,6 +599,14 @@ export default function Home() {
     }
   }, [hasMoreNotes, loadingMoreNotes, notesCursor, user]);
 
+  const handleNotesScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      const top = event.currentTarget.scrollTop <= 0;
+      if (top !== isNotesListAtTop) setIsNotesListAtTop(top);
+    },
+    [isNotesListAtTop],
+  );
+
   const visibleNotes = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return notes.filter((note) => {
@@ -380,6 +619,12 @@ export default function Home() {
       return labelMatches && textMatches;
     });
   }, [notes, search, selectedLabel]);
+
+  useEffect(() => {
+    if (loadingData || visibleNotes.length === 0) {
+      setIsNotesListAtTop(true);
+    }
+  }, [loadingData, visibleNotes.length]);
 
   const labelNoteCounts = useMemo(() => {
     const counts: Record<string, number> = { none: 0 };
@@ -400,8 +645,12 @@ export default function Home() {
     setError("");
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch {
-      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Sign-in failed. Please allow popups and try again.";
+      setError(message);
     }
   };
 
@@ -488,9 +737,7 @@ export default function Home() {
     const body = noteBody.trim();
     if (!body) return;
 
-    const selectedLabels = displayedLabels.filter((label) =>
-      noteLabels.includes(label.id),
-    );
+    const selectedLabels = getSelectedLabels(noteLabels);
     const labelIds = selectedLabels.map((label) => label.id);
     const labelNames = selectedLabels.map((label) => label.name);
     const optimisticId = newId("note");
@@ -508,11 +755,7 @@ export default function Home() {
     setNotes((prev) => [optimisticNote, ...prev]);
     setLoadingData(false);
 
-    setNoteTitle("");
-    setNoteBody("");
-    setNoteLabels([]);
-    setEditorUndoStack([]);
-    setEditorRedoStack([]);
+    resetNewNoteDraft();
     setShowEditor(false);
     enqueueMutations([
       {
@@ -531,11 +774,7 @@ export default function Home() {
   };
 
   const handleCancelEditor = () => {
-    setNoteTitle("");
-    setNoteBody("");
-    setNoteLabels([]);
-    setEditorUndoStack([]);
-    setEditorRedoStack([]);
+    resetNewNoteDraft();
     setShowEditorLabelPicker(false);
     setShowEditor(false);
   };
@@ -702,9 +941,7 @@ export default function Home() {
       return;
     }
     const now = Date.now();
-    const selectedLabels = displayedLabels.filter((label) =>
-      activeNoteLabels.includes(label.id),
-    );
+    const selectedLabels = getSelectedLabels(activeNoteLabels);
     const nextLabelIds = selectedLabels.map((label) => label.id);
     const nextLabelNames = selectedLabels.map((label) => label.name);
     setNotes((prev) =>
@@ -751,10 +988,13 @@ export default function Home() {
   const handlePasteNewNoteBody = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      applyEditorChange({
-        title: noteTitle,
-        body: `${noteBody}${noteBody ? "\n" : ""}${text}`,
-      }, { forceCheckpoint: true });
+      applyEditorChange(
+        {
+          title: noteTitle,
+          body: `${noteBody}${noteBody ? "\n" : ""}${text}`,
+        },
+        { forceCheckpoint: true },
+      );
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -763,10 +1003,13 @@ export default function Home() {
   const handlePasteNoteBody = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      applyDialogChange({
-        title: activeNoteTitle,
-        body: `${activeNoteBody}${activeNoteBody ? "\n" : ""}${text}`,
-      }, { forceCheckpoint: true });
+      applyDialogChange(
+        {
+          title: activeNoteTitle,
+          body: `${activeNoteBody}${activeNoteBody ? "\n" : ""}${text}`,
+        },
+        { forceCheckpoint: true },
+      );
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -783,9 +1026,7 @@ export default function Home() {
 
   const handleDeleteFromNoteDialog = () => {
     if (!activeNoteId) return;
-    const selectedLabels = displayedLabels.filter((label) =>
-      activeNoteLabels.includes(label.id),
-    );
+    const selectedLabels = getSelectedLabels(activeNoteLabels);
     openDeleteConfirm({
       id: activeNoteId,
       title: activeNoteTitle,
@@ -831,9 +1072,7 @@ export default function Home() {
   if (authLoading) {
     return (
       <main className="outer">
-        <section className="phone">
-          <p className="loading">Loading...</p>
-        </section>
+        <section className="phone" />
       </main>
     );
   }
@@ -842,10 +1081,30 @@ export default function Home() {
     return (
       <main className="outer">
         <section className="phone">
-          <button className="googleButton" onClick={handleSignIn} type="button">
-            <i className="fa-brands fa-google" aria-hidden="true" />
-            Sign in with Google
-          </button>
+          <div className="authStack">
+            <div className="authBrand">
+              <Image
+                src="/logo.png"
+                alt="VeeNote logo"
+                width={34}
+                height={34}
+                className="authBrandLogo"
+                priority
+              />
+              <span className="authBrandText">VeeNote</span>
+            </div>
+            <div className="authActions">
+              <button
+                className="googleButton"
+                onClick={handleSignIn}
+                type="button"
+              >
+                <GoogleLogoIcon />
+                Sign in with Google
+              </button>
+              <p>Welcome, enjoy note taking!</p>
+            </div>
+          </div>
           {error && <p className="error">{error}</p>}
         </section>
       </main>
@@ -855,15 +1114,20 @@ export default function Home() {
   if (showEditor) {
     return (
       <main className="outer">
-        <section className="phone">
+        <section
+          className={`phone ${showEditorLabelPicker ? "pageOverlayBlur" : ""}`}
+        >
           <div className="noteDialogBackdrop" onClick={handleCancelEditor}>
             <form
-              className="noteDialog"
+              className={`noteDialog ${
+                showEditorLabelPicker ? "noteDialogLabelPickerOpen" : ""
+              }`}
               onSubmit={handleSaveNote}
               onClick={(e) => e.stopPropagation()}
             >
               <input
                 className="titleInput"
+                name="new_note_title"
                 placeholder="Title"
                 value={noteTitle}
                 onChange={(e) =>
@@ -876,6 +1140,7 @@ export default function Home() {
               <div className="editorBodyWrap">
                 <textarea
                   className="bodyInput"
+                  name="new_note_body"
                   placeholder="Note"
                   value={noteBody}
                   onChange={(e) =>
@@ -886,25 +1151,10 @@ export default function Home() {
                   }
                 />
               </div>
-              <div className="labelTriggerGroup">
-                <button
-                  className="selectButton labelTriggerButton"
-                  type="button"
-                  onClick={() => setShowEditorLabelPicker(true)}
-                >
-                  Add label
-                </button>
-                {noteLabelNames.map((labelName, index) => (
-                  <button
-                    key={`${labelName}-${index}`}
-                    className="selectButton labelTriggerButton"
-                    type="button"
-                    onClick={() => setShowEditorLabelPicker(true)}
-                  >
-                    {labelName}
-                  </button>
-                ))}
-              </div>
+              <LabelTriggerGroup
+                labelNames={noteLabelNames}
+                onOpen={() => setShowEditorLabelPicker(true)}
+              />
               <div className="dialogBottomActions">
                 <div className="textActionButtons">
                   <button
@@ -955,58 +1205,16 @@ export default function Home() {
               </div>
             </form>
           </div>
-          {showEditorLabelPicker && (
-            <div
-              className="pickerBackdrop"
-              onClick={() => setShowEditorLabelPicker(false)}
-            >
-              <div
-                className="noteLabelPickerDialog"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="noteLabelOptions">
-                  <button
-                    className="noteLabelOption"
-                    type="button"
-                    onClick={() => setNoteLabels([])}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={noteLabels.length === 0}
-                      readOnly
-                    />
-                    <span>No label</span>
-                  </button>
-                  {displayedLabels.map((label) => (
-                    <button
-                      key={label.id}
-                      className="noteLabelOption"
-                      type="button"
-                      onClick={() => {
-                        setNoteLabels((prev) => toggleId(prev, label.id));
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={noteLabels.includes(label.id)}
-                        readOnly
-                      />
-                      <span>{label.name}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="noteLabelFooter">
-                  <button
-                    className="saveButton"
-                    type="button"
-                    onClick={() => setShowEditorLabelPicker(false)}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <NoteLabelPickerDialog
+            open={showEditorLabelPicker}
+            labels={displayedLabels}
+            selectedIds={noteLabels}
+            namePrefix="new_note_label"
+            onToggle={(id) => {
+              setNoteLabels((prev) => toggleId(prev, id));
+            }}
+            onClose={() => setShowEditorLabelPicker(false)}
+          />
         </section>
       </main>
     );
@@ -1014,11 +1222,15 @@ export default function Home() {
 
   return (
     <main className="outer">
-      <section className="phone">
+      <section
+        className={`phone ${hasMainOverlayOpen ? "pageOverlayBlur" : ""}`}
+      >
         <header className="toolbar">
           <input
+            ref={searchInputRef}
             className="search"
             type="search"
+            name="search_notes"
             placeholder="Search notes"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -1041,81 +1253,31 @@ export default function Home() {
           </button>
         </header>
 
-        {loadingData ? (
-          <p className="loading">Syncing notes...</p>
-        ) : visibleNotes.length === 0 ? (
+        {loadingData ? null : visibleNotes.length === 0 ? (
           <div className="phoneEmptyWrap">
             <p className="empty phoneEmpty">No notes found.</p>
           </div>
         ) : (
-          <div className="grid">
-            {visibleNotes.map((note) => (
-              <article
-                key={note.id}
-                className="card cardInteractive"
-                onClick={() => openNoteDialog(note)}
-              >
-                <button
-                  className="cardCopyButton"
-                  type="button"
-                  aria-label="Copy note text"
-                  title="Copy text"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleCopyCardBody(note.body);
-                  }}
-                >
-                  <i className="fa-solid fa-copy" aria-hidden="true" />
-                </button>
-                <h3 title={note.title}>
-                  {note.title.length > 12
-                    ? `${note.title.slice(0, 12)}...`
-                    : note.title}
-                </h3>
-                <p>{note.body}</p>
-                <time className="cardTime">
-                  {new Date(note.updatedAtMs).toLocaleDateString()}
-                </time>
-                {note.labelNames.length > 0 && (
-                  <footer>
-                    <div className="cardLabels">
-                      {note.labelNames
-                        .slice()
-                        .sort((a, b) => a.localeCompare(b))
-                        .map((label) => (
-                        <span
-                          className="cardLabelChip"
-                          key={`${note.id}-${label}`}
-                        >
-                          <span className="cardLabelText">{label}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </footer>
-                )}
-              </article>
-            ))}
-            {hasMoreNotes &&
-              search.trim().length === 0 &&
-              selectedLabel === "all" && (
-                <button
-                  className="loadMoreButton"
-                  type="button"
-                  onClick={handleLoadMoreNotes}
-                  disabled={loadingMoreNotes}
-                >
-                  {loadingMoreNotes ? "Loading..." : "Load more"}
-                </button>
-              )}
-          </div>
+          <NotesGrid
+            visibleNotes={visibleNotes}
+            hasMoreNotes={hasMoreNotes}
+            loadingMoreNotes={loadingMoreNotes}
+            search={search}
+            selectedLabel={selectedLabel}
+            onOpenNote={openNoteDialog}
+            onCopyCardBody={handleCopyCardBody}
+            onLoadMoreNotes={() => {
+              void handleLoadMoreNotes();
+            }}
+            onScroll={handleNotesScroll}
+          />
         )}
 
         <button
           className="fab"
           type="button"
           onClick={() => {
-            setEditorUndoStack([]);
-            setEditorRedoStack([]);
+            resetNewNoteDraft();
             setShowEditor(true);
           }}
           aria-label="Add note"
@@ -1123,11 +1285,14 @@ export default function Home() {
         >
           <i className="fa-solid fa-plus" aria-hidden="true" />
         </button>
-        <button className="signOut" type="button" onClick={handleSignOut}>
-          <i className="fa-brands fa-google" aria-hidden="true" />
-          Sign out
+        <button
+          className={`signOut ${isNotesListAtTop ? "" : "signOutHidden"}`}
+          type="button"
+          onClick={handleSignOut}
+        >
+          <GoogleLogoIcon />
+          Sign Out
         </button>
-
         {showLabelManager && (
           <div
             className="modalBackdrop"
@@ -1136,6 +1301,7 @@ export default function Home() {
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <form className="modalRow" onSubmit={handleCreateLabel}>
                 <input
+                  name="new_label_name"
                   value={newLabel}
                   onChange={(e) => setNewLabel(e.target.value)}
                   placeholder="New label"
@@ -1146,24 +1312,14 @@ export default function Home() {
                 {displayedLabels.map((label) => (
                   <div key={label.id} className="labelItem">
                     <span>{label.name}</span>
-                    {label.isOptimistic ? (
-                      <button
-                        type="button"
-                        className="pendingLabelButton"
-                        disabled
-                      >
-                        Syncing
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        aria-label="Delete label"
-                        title="Delete label"
-                        onClick={() => handleDeleteLabel(label.id)}
-                      >
-                        <i className="fa-solid fa-trash" aria-hidden="true" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      aria-label="Delete label"
+                      title="Delete label"
+                      onClick={() => handleDeleteLabel(label.id)}
+                    >
+                      <i className="fa-solid fa-trash" aria-hidden="true" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1173,7 +1329,7 @@ export default function Home() {
 
         {showFilterPicker && (
           <div
-            className="pickerBackdrop"
+            className="pickerBackdrop noteLabelPickerBackdrop"
             onClick={() => setShowFilterPicker(false)}
           >
             <div className="pickerDialog" onClick={(e) => e.stopPropagation()}>
@@ -1220,9 +1376,15 @@ export default function Home() {
 
         {showNoteDialog && (
           <div className="noteDialogBackdrop" onClick={closeNoteDialog}>
-            <div className="noteDialog" onClick={(e) => e.stopPropagation()}>
+            <div
+              className={`noteDialog ${
+                showNoteLabelPicker ? "noteDialogLabelPickerOpen" : ""
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
               <input
                 className="titleInput"
+                name="active_note_title"
                 value={activeNoteTitle}
                 onChange={(e) =>
                   applyDialogChange({
@@ -1235,6 +1397,7 @@ export default function Home() {
               <div className="editorBodyWrap">
                 <textarea
                   className="bodyInput"
+                  name="active_note_body"
                   value={activeNoteBody}
                   onChange={(e) =>
                     applyDialogChange({
@@ -1245,25 +1408,10 @@ export default function Home() {
                   placeholder="Note"
                 />
               </div>
-              <div className="labelTriggerGroup">
-                <button
-                  className="selectButton labelTriggerButton"
-                  type="button"
-                  onClick={() => setShowNoteLabelPicker(true)}
-                >
-                  Add label
-                </button>
-                {activeNoteLabelNames.map((labelName, index) => (
-                  <button
-                    key={`${labelName}-${index}`}
-                    className="selectButton labelTriggerButton"
-                    type="button"
-                    onClick={() => setShowNoteLabelPicker(true)}
-                  >
-                    {labelName}
-                  </button>
-                ))}
-              </div>
+              <LabelTriggerGroup
+                labelNames={activeNoteLabelNames}
+                onOpen={() => setShowNoteLabelPicker(true)}
+              />
               <div className="dialogBottomActions">
                 <div className="textActionButtons">
                   <button
@@ -1329,58 +1477,16 @@ export default function Home() {
           </div>
         )}
 
-        {showNoteLabelPicker && (
-          <div
-            className="pickerBackdrop"
-            onClick={() => setShowNoteLabelPicker(false)}
-          >
-            <div
-              className="noteLabelPickerDialog"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="noteLabelOptions">
-                <button
-                  className="noteLabelOption"
-                  type="button"
-                  onClick={() => setActiveNoteLabels([])}
-                >
-                  <input
-                    type="checkbox"
-                    checked={activeNoteLabels.length === 0}
-                    readOnly
-                  />
-                  <span>No label</span>
-                </button>
-                {displayedLabels.map((label) => (
-                  <button
-                    key={label.id}
-                    className="noteLabelOption"
-                    type="button"
-                    onClick={() => {
-                      setActiveNoteLabels((prev) => toggleId(prev, label.id));
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={activeNoteLabels.includes(label.id)}
-                      readOnly
-                    />
-                    <span>{label.name}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="noteLabelFooter">
-                <button
-                  className="saveButton"
-                  type="button"
-                  onClick={() => setShowNoteLabelPicker(false)}
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <NoteLabelPickerDialog
+          open={showNoteLabelPicker}
+          labels={displayedLabels}
+          selectedIds={activeNoteLabels}
+          namePrefix="active_note_label"
+          onToggle={(id) => {
+            setActiveNoteLabels((prev) => toggleId(prev, id));
+          }}
+          onClose={() => setShowNoteLabelPicker(false)}
+        />
 
         {showDeleteConfirm && (
           <div className="confirmBackdrop" onClick={closeDeleteConfirm}>

@@ -3,7 +3,19 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color: #505050;
-  background: #fff;
+  background-color: #fff;
+  background-image:
+    radial-gradient(
+      760px 860px at 0% 0%,
+      rgba(112, 168, 255, 0.14),
+      transparent 78%
+    ),
+    radial-gradient(
+      760px 860px at 100% 100%,
+      rgba(255, 184, 108, 0.14),
+      transparent 78%
+    );
+  background-repeat: no-repeat;
 }
 
 * {
