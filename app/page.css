@@ -301,7 +301,8 @@
   position: relative;
   border-radius: 20px;
   background: var(--ui-bg);
-  min-height: 170px;
+  min-height: 165px;
+  overflow: hidden;
   padding: 0.85rem;
   display: flex;
   flex-direction: column;
@@ -334,11 +335,13 @@
   font-size: var(--fs-body);
   line-height: 1.5;
   color: #505050;
-  display: block;
-  overflow: visible;
-  white-space: pre-wrap !important;
-  overflow-wrap: anywhere !important;
-  word-break: break-all;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 textarea {
