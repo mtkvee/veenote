@@ -288,7 +288,7 @@ function NotesGrid({
 }
 
 export default function Home() {
-  const [authLoading, setAuthLoading] = useState(firebaseReady);
+  const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [labels, setLabels] = useState<Label[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -384,16 +384,6 @@ export default function Home() {
     });
     return unsubscribe;
   }, []);
-
-  useEffect(() => {
-    if (!authLoading) return;
-    const timer = window.setTimeout(() => {
-      setAuthLoading(false);
-    }, 750);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [authLoading]);
 
   useEffect(() => {
     queueRef.current = syncQueue;
@@ -1113,7 +1103,21 @@ export default function Home() {
   if (authLoading) {
     return (
       <main className="outer">
-        <section className="phone" />
+        <section className="phone">
+          <div className="authStack">
+            <div className="authBrand">
+              <Image
+                src="/logo.png"
+                alt="VeeNote logo"
+                width={34}
+                height={34}
+                className="authBrandLogo"
+                priority
+              />
+              <span className="authBrandText">VeeNote</span>
+            </div>
+          </div>
+        </section>
       </main>
     );
   }
