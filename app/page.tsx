@@ -23,10 +23,65 @@ import {
 import { auth, db, firebaseReady, googleProvider } from "@/lib/firebase";
 import { mapFirestoreNote, newId } from "@/lib/notesSync";
 import type { Label, Note } from "@/lib/notesSync";
+import { ToastViewport } from "@/app/components/ToastViewport";
+import { useToasts } from "@/lib/useToasts";
 import "./page.css";
 
 const MAX_HISTORY_SIZE = 200;
 const timestampNowMs = () => Date.now();
+const resolveNoteTitle = (rawTitle: string, rawBody: string) => {
+  const title = rawTitle.trim();
+  if (title.length > 0) return title;
+  const firstLine = rawBody.trim().split("\n")[0] ?? "";
+  const collapsed = firstLine.trim().replace(/\s+/g, " ");
+  if (collapsed.length === 0) return "Untitled";
+  return collapsed.slice(0, 120);
+};
+const sortNotesByUpdatedAtDesc = (items: Note[]) =>
+  items.slice().sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+
+const buildFullNoteWritePayload = (
+  title: string,
+  body: string,
+  labelIds: string[],
+  labelNames: string[],
+  updatedAtMs: number,
+) => ({
+  title,
+  body,
+  labelIds,
+  labelNames,
+  labelId: labelIds[0] ?? "none",
+  labelName: labelNames[0] ?? "No label",
+  updatedAtMs,
+  updatedAt: serverTimestamp(),
+});
+
+const buildNoteUpdatePatch = (
+  previous: Note,
+  next: Note,
+  updatedAtMs: number,
+) => {
+  const patch: Record<string, unknown> = {
+    updatedAtMs,
+    updatedAt: serverTimestamp(),
+  };
+  if (previous.title !== next.title) patch.title = next.title;
+  if (previous.body !== next.body) patch.body = next.body;
+
+  const labelsChanged =
+    previous.labelIds.length !== next.labelIds.length ||
+    previous.labelIds.some((id, idx) => id !== next.labelIds[idx]) ||
+    previous.labelNames.length !== next.labelNames.length ||
+    previous.labelNames.some((name, idx) => name !== next.labelNames[idx]);
+  if (labelsChanged) {
+    patch.labelIds = next.labelIds;
+    patch.labelNames = next.labelNames;
+    patch.labelId = next.labelIds[0] ?? "none";
+    patch.labelName = next.labelNames[0] ?? "No label";
+  }
+  return patch;
+};
 
 type FirestoreNoteData = {
   title?: string;
@@ -249,6 +304,7 @@ function NotesGrid({
 }
 
 export default function Home() {
+  const { toasts, showToast } = useToasts();
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [labels, setLabels] = useState<Label[]>([]);
@@ -280,6 +336,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isNotesListAtTop, setIsNotesListAtTop] = useState(true);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const createSaveInFlightRef = useRef(false);
+  const noteWriteInFlightRef = useRef<Set<string>>(new Set());
   const hasMainOverlayOpen =
     showLabelManager ||
     showFilterPicker ||
@@ -317,6 +375,8 @@ export default function Home() {
         setLabels([]);
         setNotes([]);
         setLoadingData(false);
+        createSaveInFlightRef.current = false;
+        noteWriteInFlightRef.current.clear();
       } else {
         setLabels([]);
         setNotes([]);
@@ -333,24 +393,68 @@ export default function Home() {
     const labelsRef = collection(db, "users", user.uid, "labels");
     const notesRef = collection(db, "users", user.uid, "notes");
 
-    const unsubscribeLabels = onSnapshot(labelsRef, (snapshot) => {
-      const incoming = snapshot.docs.map((docItem) => {
-        const data = docItem.data() as { name?: string };
-        return { id: docItem.id, name: data.name ?? "" };
-      });
-      setLabels(incoming);
-    });
+    const unsubscribeLabels = onSnapshot(
+      labelsRef,
+      (snapshot) => {
+        const changes = snapshot.docChanges();
+        setLabels((prev) => {
+          if (changes.length === 0 || changes.length === snapshot.docs.length) {
+            return snapshot.docs.map((docItem) => {
+              const data = docItem.data() as { name?: string };
+              return { id: docItem.id, name: data.name ?? "" };
+            });
+          }
+          const map = new Map(prev.map((label) => [label.id, label]));
+          changes.forEach((change) => {
+            const data = change.doc.data() as { name?: string };
+            if (change.type === "removed") {
+              map.delete(change.doc.id);
+              return;
+            }
+            map.set(change.doc.id, { id: change.doc.id, name: data.name ?? "" });
+          });
+          return Array.from(map.values());
+        });
+      },
+      () => {
+        setError("Realtime label sync disconnected. Retrying...");
+      },
+    );
 
     const notesQuery = query(notesRef, orderBy("updatedAtMs", "desc"));
 
-    const unsubscribeNotes = onSnapshot(notesQuery, (snapshot) => {
-      const incoming = snapshot.docs.map((docItem) =>
-        mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
-      );
-      incoming.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
-      setNotes(incoming);
-      setLoadingData(false);
-    });
+    const unsubscribeNotes = onSnapshot(
+      notesQuery,
+      (snapshot) => {
+        const changes = snapshot.docChanges();
+        setNotes((prev) => {
+          if (changes.length === 0 || changes.length === snapshot.docs.length) {
+            return sortNotesByUpdatedAtDesc(
+              snapshot.docs.map((docItem) =>
+                mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
+              ),
+            );
+          }
+          const map = new Map(prev.map((note) => [note.id, note]));
+          changes.forEach((change) => {
+            if (change.type === "removed") {
+              map.delete(change.doc.id);
+              return;
+            }
+            map.set(
+              change.doc.id,
+              mapFirestoreNote(change.doc.id, change.doc.data() as FirestoreNoteData),
+            );
+          });
+          return sortNotesByUpdatedAtDesc(Array.from(map.values()));
+        });
+        setLoadingData(false);
+      },
+      () => {
+        setLoadingData(false);
+        setError("Realtime note sync disconnected. Retrying...");
+      },
+    );
 
     return () => {
       unsubscribeLabels();
@@ -503,6 +607,7 @@ export default function Home() {
       });
       await batch.commit();
       setError("");
+      showToast("Item deleted.", "success");
     } catch {
       setError("Unable to delete label. Please try again.");
     }
@@ -512,44 +617,62 @@ export default function Home() {
     setActiveNoteLabels((prev) => prev.filter((id) => id !== labelId));
   };
 
-  const handleSaveNote = async (e: FormEvent) => {
+  const handleSaveNote = (e: FormEvent) => {
     e.preventDefault();
-    if (!db || !user) return;
+    if (createSaveInFlightRef.current) return;
+    if (!db) {
+      setError("Cloud database is unavailable.");
+      return;
+    }
+    if (!user || !auth?.currentUser || auth.currentUser.uid !== user.uid) {
+      setError("Session expired. Please sign in again.");
+      return;
+    }
+
     const firestore = db;
     const uid = user.uid;
-    const title = noteTitle.trim();
+    const title = resolveNoteTitle(noteTitle, noteBody);
     const body = noteBody.trim();
-    if (!body) return;
+    if (!body) {
+      setError("Body is required.");
+      return;
+    }
 
     const selectedLabels = getSelectedLabels(noteLabels);
     const labelIds = selectedLabels.map((label) => label.id);
     const labelNames = selectedLabels.map((label) => label.name);
     const noteId = newId("note");
     const now = timestampNowMs();
-    const labelId = labelIds[0] ?? "none";
-    const labelName = labelNames[0] ?? "No label";
+    const optimisticNote: Note = {
+      id: noteId,
+      title,
+      body,
+      labelIds,
+      labelNames,
+      updatedAtMs: now,
+    };
 
-    try {
-      await setDoc(
-        doc(firestore, "users", uid, "notes", noteId),
-        {
-          title,
-          body,
-          labelIds,
-          labelNames,
-          labelId,
-          labelName,
-          updatedAtMs: now,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      setError("");
-      resetNewNoteDraft();
-      setShowEditor(false);
-    } catch {
-      setError("Unable to save note. Please try again.");
-    }
+    createSaveInFlightRef.current = true;
+    setError("");
+    setShowEditor(false);
+    setShowEditorLabelPicker(false);
+    resetNewNoteDraft();
+    setNotes((prev) => sortNotesByUpdatedAtDesc([optimisticNote, ...prev]));
+
+    void (async () => {
+      try {
+        await setDoc(
+          doc(firestore, "users", uid, "notes", noteId),
+          buildFullNoteWritePayload(title, body, labelIds, labelNames, now),
+          { merge: true },
+        );
+      } catch {
+        setNotes((prev) => prev.filter((note) => note.id !== noteId));
+        showToast("Unable to sync note. Please try saving again.", "info");
+      } finally {
+        createSaveInFlightRef.current = false;
+      }
+    })();
   };
 
   const handleCancelEditor = () => {
@@ -711,11 +834,18 @@ export default function Home() {
     setActiveNoteBody(next.body);
   };
 
-  const handleUpdateNote = async () => {
+  const handleUpdateNote = () => {
     if (!db || !user || !activeNoteId) return;
+    if (!auth?.currentUser || auth.currentUser.uid !== user.uid) {
+      setError("Session expired. Please sign in again.");
+      return;
+    }
+    if (noteWriteInFlightRef.current.has(activeNoteId)) return;
+
     const firestore = db;
     const uid = user.uid;
-    const title = activeNoteTitle.trim();
+    const noteId = activeNoteId;
+    const title = resolveNoteTitle(activeNoteTitle, activeNoteBody);
     const body = activeNoteBody.trim();
     if (!body) {
       setError("Body is required.");
@@ -725,33 +855,50 @@ export default function Home() {
     const selectedLabels = getSelectedLabels(activeNoteLabels);
     const nextLabelIds = selectedLabels.map((label) => label.id);
     const nextLabelNames = selectedLabels.map((label) => label.name);
-    const nextPrimaryLabelId = nextLabelIds[0] ?? "none";
-    const nextPrimaryLabelName = nextLabelNames[0] ?? "No label";
-    try {
-      await setDoc(
-        doc(firestore, "users", uid, "notes", activeNoteId),
-        {
-          title,
-          body,
-          labelIds: nextLabelIds,
-          labelNames: nextLabelNames,
-          labelId: nextPrimaryLabelId,
-          labelName: nextPrimaryLabelName,
-          updatedAtMs: now,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      setError("");
-      closeNoteDialog();
-    } catch {
-      setError("Unable to update note. Please try again.");
-    }
+    const previousNote = notes.find((note) => note.id === noteId);
+    if (!previousNote) return;
+    const optimisticUpdated: Note = {
+      ...previousNote,
+      title,
+      body,
+      labelIds: nextLabelIds,
+      labelNames: nextLabelNames,
+      updatedAtMs: now,
+    };
+
+    noteWriteInFlightRef.current.add(noteId);
+    setError("");
+    setNotes((prev) =>
+      sortNotesByUpdatedAtDesc(
+        prev.map((note) => (note.id === noteId ? optimisticUpdated : note)),
+      ),
+    );
+    closeNoteDialog();
+
+    void (async () => {
+      try {
+        await setDoc(
+          doc(firestore, "users", uid, "notes", noteId),
+          buildNoteUpdatePatch(previousNote, optimisticUpdated, now),
+          { merge: true },
+        );
+      } catch {
+        setNotes((prev) =>
+          sortNotesByUpdatedAtDesc(
+            prev.map((note) => (note.id === noteId ? previousNote : note)),
+          ),
+        );
+        showToast("Unable to sync update. Changes were reverted.", "info");
+      } finally {
+        noteWriteInFlightRef.current.delete(noteId);
+      }
+    })();
   };
 
   const handleCopyCardBody = async (body: string) => {
     try {
       await navigator.clipboard.writeText(body);
+      showToast("Copied to clipboard.", "success");
     } catch {
       setError("Copy failed. Clipboard permission may be blocked.");
     }
@@ -767,6 +914,7 @@ export default function Home() {
         },
         { forceCheckpoint: true },
       );
+      showToast("Pasted from clipboard.", "info");
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -782,6 +930,7 @@ export default function Home() {
         },
         { forceCheckpoint: true },
       );
+      showToast("Pasted from clipboard.", "info");
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -824,6 +973,7 @@ export default function Home() {
       setError("");
       if (activeNoteId === pendingDeleteNoteId) closeNoteDialog();
       closeDeleteConfirm();
+      showToast("Item deleted.", "success");
     } catch {
       setError("Unable to delete note. Please try again.");
     }
@@ -892,6 +1042,7 @@ export default function Home() {
             </div>
           </div>
           {error && <p className="error">{error}</p>}
+          <ToastViewport toasts={toasts} />
         </section>
       </main>
     );
@@ -1004,6 +1155,7 @@ export default function Home() {
             }}
             onClose={() => setShowEditorLabelPicker(false)}
           />
+          <ToastViewport toasts={toasts} />
         </section>
       </main>
     );
@@ -1304,6 +1456,7 @@ export default function Home() {
         )}
 
         {error && <p className="error">{error}</p>}
+        <ToastViewport toasts={toasts} />
       </section>
     </main>
   );

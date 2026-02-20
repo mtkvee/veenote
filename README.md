@@ -155,3 +155,26 @@ Goal: verify that create/update/delete changes on Device A appear on Device B au
 1. All tests A-G pass with no manual refresh.
 2. No stale notes/labels remain after auth transitions.
 3. Cross-device state converges to identical notes/labels for the same user.
+
+## 6. Production sync configuration checklist
+
+Use this checklist before production deploys to keep write-to-read latency low.
+
+1. Region:
+   - Create Firestore in the region closest to your primary users.
+   - Keep your web hosting and Firebase project in the same geography when possible.
+2. Indexing:
+   - Ensure `updatedAtMs` ordering queries are deployed with current Firestore rules/indexes:
+     ```bash
+     npm run firebase:deploy:firestore
+     ```
+   - Resolve any Firestore console index warnings before release.
+3. Caching:
+   - This app uses `getFirestore(app)` (memory cache only), not persistent local cache.
+   - This avoids stale cross-tab cache behavior and prioritizes live server snapshots.
+4. Listener model:
+   - Keep `onSnapshot` subscriptions active for both labels and notes.
+   - Do not reintroduce polling or interval-based sync loops.
+5. Write path:
+   - Keep writes immediate (`setDoc`/`deleteDoc`), no debounce/throttle on save.
+   - Use `writeBatch` for related multi-document updates (e.g., label delete cascade).
