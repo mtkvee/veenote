@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./globals.css";
@@ -7,9 +7,11 @@ import "./globals.css";
 const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://veenoteapp.vercel.app";
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
+const dmSans = localFont({
+  src: "./fonts/DMSans-Variable.ttf",
+  variable: "--font-dm-sans",
+  display: "swap",
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
@@ -86,7 +88,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.variable}>
+      <body className={dmSans.variable}>
         <script
           type="application/ld+json"
           // JSON-LD for SEO

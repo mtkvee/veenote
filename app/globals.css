@@ -1,7 +1,17 @@
+html,
 body {
-  font-family: var(--font-inter), sans-serif;
+  font-family:
+    var(--font-dm-sans),
+    "Segoe UI",
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body {
   color: #505050;
   background-color: #fff;
   background-image:
@@ -27,7 +37,13 @@ body {
 input,
 button,
 textarea,
-select {
+select,
+option {
+  font: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
   font: inherit;
 }
 

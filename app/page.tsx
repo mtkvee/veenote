@@ -10,39 +10,23 @@ import {
   signOut,
 } from "firebase/auth";
 import {
-  DocumentData,
-  QueryDocumentSnapshot,
   collection,
-  getDocs,
-  limit,
   orderBy,
   doc,
   onSnapshot,
   query,
   serverTimestamp,
-  startAfter,
   setDoc,
   deleteDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { auth, db, firebaseReady, googleProvider } from "@/lib/firebase";
-import {
-  applyQueueToLabels,
-  applyQueueToNotes,
-  loadQueue,
-  mapFirestoreNote,
-  newId,
-  saveQueue,
-} from "@/lib/notesSync";
-import type { Label, Note, SyncMutation } from "@/lib/notesSync";
+import { mapFirestoreNote, newId } from "@/lib/notesSync";
+import type { Label, Note } from "@/lib/notesSync";
 import "./page.css";
 
-const NOTES_PAGE_SIZE = 40;
-const MAX_SYNC_QUEUE_SIZE = 250;
-const BASE_SYNC_INTERVAL_MS = 1200;
-const MAX_BACKOFF_MS = 15000;
 const MAX_HISTORY_SIZE = 200;
-const HIDDEN_SYNC_WARNING =
-  "Saved locally. Cloud sync will retry automatically.";
+const timestampNowMs = () => Date.now();
 
 type FirestoreNoteData = {
   title?: string;
@@ -206,30 +190,17 @@ function NoteLabelPickerDialog({
 
 type NotesGridProps = {
   visibleNotes: Note[];
-  hasMoreNotes: boolean;
-  loadingMoreNotes: boolean;
-  search: string;
-  selectedLabel: string;
   onOpenNote: (note: Note) => void;
   onCopyCardBody: (body: string) => Promise<void>;
-  onLoadMoreNotes: () => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
 };
 
 function NotesGrid({
   visibleNotes,
-  hasMoreNotes,
-  loadingMoreNotes,
-  search,
-  selectedLabel,
   onOpenNote,
   onCopyCardBody,
-  onLoadMoreNotes,
   onScroll,
 }: NotesGridProps) {
-  const shouldShowLoadMore =
-    hasMoreNotes && search.trim().length === 0 && selectedLabel === "all";
-
   return (
     <div className="grid" onScroll={onScroll}>
       {visibleNotes.map((note) => (
@@ -273,16 +244,6 @@ function NotesGrid({
           )}
         </article>
       ))}
-      {shouldShowLoadMore && (
-        <button
-          className="loadMoreButton"
-          type="button"
-          onClick={onLoadMoreNotes}
-          disabled={loadingMoreNotes}
-        >
-          {loadingMoreNotes ? "Loading..." : "Load more"}
-        </button>
-      )}
     </div>
   );
 }
@@ -292,12 +253,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [labels, setLabels] = useState<Label[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [syncQueue, setSyncQueue] = useState<SyncMutation[]>([]);
   const [loadingData, setLoadingData] = useState(false);
-  const [loadingMoreNotes, setLoadingMoreNotes] = useState(false);
-  const [hasMoreNotes, setHasMoreNotes] = useState(false);
-  const [notesCursor, setNotesCursor] =
-    useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [search, setSearch] = useState("");
   const [selectedLabel, setSelectedLabel] = useState("all");
   const [showFilterPicker, setShowFilterPicker] = useState(false);
@@ -324,11 +280,6 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isNotesListAtTop, setIsNotesListAtTop] = useState(true);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const queueRef = useRef<SyncMutation[]>([]);
-  const syncInFlightRef = useRef(false);
-  const nextSyncAttemptAtRef = useRef(0);
-  const syncIntervalRef = useRef(BASE_SYNC_INTERVAL_MS);
-  const firstPageNoteIdsRef = useRef<Set<string>>(new Set());
   const hasMainOverlayOpen =
     showLabelManager ||
     showFilterPicker ||
@@ -365,30 +316,16 @@ export default function Home() {
       if (!currentUser) {
         setLabels([]);
         setNotes([]);
-        setSyncQueue([]);
-        setHasMoreNotes(false);
-        setNotesCursor(null);
-        firstPageNoteIdsRef.current = new Set();
         setLoadingData(false);
       } else {
-        const queued = loadQueue(currentUser.uid);
-        setSyncQueue(queued);
-        setLabels(applyQueueToLabels([], queued));
-        setNotes(applyQueueToNotes([], queued));
-        setHasMoreNotes(false);
-        setNotesCursor(null);
-        firstPageNoteIdsRef.current = new Set();
+        setLabels([]);
+        setNotes([]);
         setLoadingData(true);
       }
       setAuthLoading(false);
     });
     return unsubscribe;
   }, []);
-
-  useEffect(() => {
-    queueRef.current = syncQueue;
-    if (user) saveQueue(user.uid, syncQueue);
-  }, [syncQueue, user]);
 
   useEffect(() => {
     if (!user || !db) return;
@@ -401,36 +338,17 @@ export default function Home() {
         const data = docItem.data() as { name?: string };
         return { id: docItem.id, name: data.name ?? "" };
       });
-      setLabels(applyQueueToLabels(incoming, queueRef.current));
+      setLabels(incoming);
     });
 
-    const firstPageQuery = query(
-      notesRef,
-      orderBy("updatedAtMs", "desc"),
-      limit(NOTES_PAGE_SIZE),
-    );
+    const notesQuery = query(notesRef, orderBy("updatedAtMs", "desc"));
 
-    const unsubscribeNotes = onSnapshot(firstPageQuery, (snapshot) => {
+    const unsubscribeNotes = onSnapshot(notesQuery, (snapshot) => {
       const incoming = snapshot.docs.map((docItem) =>
         mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
       );
       incoming.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
-      const prevFirstPageIds = firstPageNoteIdsRef.current;
-      const nextFirstPageIds = new Set(incoming.map((note) => note.id));
-      firstPageNoteIdsRef.current = nextFirstPageIds;
-
-      setHasMoreNotes(snapshot.docs.length === NOTES_PAGE_SIZE);
-      setNotesCursor(snapshot.docs.at(-1) ?? null);
-      setNotes((prev) => {
-        const preservedOlderNotes = prev.filter(
-          (note) =>
-            !prevFirstPageIds.has(note.id) && !nextFirstPageIds.has(note.id),
-        );
-        return applyQueueToNotes(
-          [...incoming, ...preservedOlderNotes],
-          queueRef.current,
-        );
-      });
+      setNotes(incoming);
       setLoadingData(false);
     });
 
@@ -439,140 +357,6 @@ export default function Home() {
       unsubscribeNotes();
     };
   }, [user]);
-
-  const enqueueMutations = useCallback((mutations: SyncMutation[]) => {
-    if (mutations.length === 0) return;
-    setSyncQueue((prev) => {
-      let next = [...prev];
-      mutations.forEach((mutation) => {
-        if (mutation.type === "note_upsert") {
-          next = next.filter(
-            (item) =>
-              !(
-                item.type === "note_upsert" && item.note.id === mutation.note.id
-              ),
-          );
-          next.push(mutation);
-          return;
-        }
-        if (mutation.type === "label_upsert") {
-          next = next.filter(
-            (item) =>
-              !(
-                item.type === "label_upsert" &&
-                item.label.id === mutation.label.id
-              ),
-          );
-          next.push(mutation);
-          return;
-        }
-        if (mutation.type === "note_delete") {
-          next = next.filter(
-            (item) =>
-              !(
-                (item.type === "note_upsert" &&
-                  item.note.id === mutation.noteId) ||
-                (item.type === "note_delete" && item.noteId === mutation.noteId)
-              ),
-          );
-          next.push(mutation);
-          return;
-        }
-        next = next.filter(
-          (item) =>
-            !(
-              (item.type === "label_upsert" &&
-                item.label.id === mutation.labelId) ||
-              (item.type === "label_delete" &&
-                item.labelId === mutation.labelId)
-            ),
-        );
-        next.push(mutation);
-      });
-      if (next.length > MAX_SYNC_QUEUE_SIZE) {
-        next = next.slice(next.length - MAX_SYNC_QUEUE_SIZE);
-      }
-      return next;
-    });
-  }, []);
-
-  const flushQueue = useCallback(async () => {
-    if (!db || !user || syncInFlightRef.current) return;
-    if (queueRef.current.length === 0) return;
-    if (Date.now() < nextSyncAttemptAtRef.current) return;
-    syncInFlightRef.current = true;
-    try {
-      while (queueRef.current.length > 0) {
-        const next = queueRef.current[0];
-        if (next.type === "label_upsert") {
-          await setDoc(
-            doc(db, "users", user.uid, "labels", next.label.id),
-            {
-              name: next.label.name,
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true },
-          );
-        } else if (next.type === "label_delete") {
-          await deleteDoc(doc(db, "users", user.uid, "labels", next.labelId));
-        } else if (next.type === "note_upsert") {
-          const labelId = next.note.labelIds[0] ?? "none";
-          const labelName = next.note.labelNames[0] ?? "No label";
-          await setDoc(
-            doc(db, "users", user.uid, "notes", next.note.id),
-            {
-              title: next.note.title,
-              body: next.note.body,
-              labelIds: next.note.labelIds,
-              labelNames: next.note.labelNames,
-              labelId,
-              labelName,
-              updatedAtMs: next.note.updatedAtMs,
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true },
-          );
-        } else {
-          await deleteDoc(doc(db, "users", user.uid, "notes", next.noteId));
-        }
-
-        setSyncQueue((prev) => {
-          if (prev.length === 0) return prev;
-          if (prev[0].id === next.id) return prev.slice(1);
-          return prev.filter((item) => item.id !== next.id);
-        });
-      }
-      syncIntervalRef.current = BASE_SYNC_INTERVAL_MS;
-      nextSyncAttemptAtRef.current = 0;
-      setError("");
-    } catch {
-      syncIntervalRef.current = Math.min(
-        syncIntervalRef.current * 2,
-        MAX_BACKOFF_MS,
-      );
-      nextSyncAttemptAtRef.current = Date.now() + syncIntervalRef.current;
-      setError(HIDDEN_SYNC_WARNING);
-    } finally {
-      syncInFlightRef.current = false;
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!db) return;
-    if (queueRef.current.length === 0) return;
-    const timer = window.setInterval(() => {
-      void flushQueue();
-    }, BASE_SYNC_INTERVAL_MS);
-    const onlineHandler = () => {
-      void flushQueue();
-    };
-    window.addEventListener("online", onlineHandler);
-    void flushQueue();
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("online", onlineHandler);
-    };
-  }, [flushQueue, syncQueue.length]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -599,37 +383,6 @@ export default function Home() {
     };
   }, [search]);
 
-  const handleLoadMoreNotes = useCallback(async () => {
-    if (!db || !user || !notesCursor || loadingMoreNotes || !hasMoreNotes)
-      return;
-    setLoadingMoreNotes(true);
-    try {
-      const notesRef = collection(db, "users", user.uid, "notes");
-      const nextPage = query(
-        notesRef,
-        orderBy("updatedAtMs", "desc"),
-        startAfter(notesCursor),
-        limit(NOTES_PAGE_SIZE),
-      );
-      const snapshot = await getDocs(nextPage);
-      const incoming = snapshot.docs.map((docItem) =>
-        mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
-      );
-      setNotesCursor(snapshot.docs.at(-1) ?? notesCursor);
-      setHasMoreNotes(snapshot.docs.length === NOTES_PAGE_SIZE);
-      setNotes((prev) => {
-        const seen = new Set(prev.map((note) => note.id));
-        const merged = [...prev];
-        incoming.forEach((note) => {
-          if (!seen.has(note.id)) merged.push(note);
-        });
-        return applyQueueToNotes(merged, queueRef.current);
-      });
-    } finally {
-      setLoadingMoreNotes(false);
-    }
-  }, [hasMoreNotes, loadingMoreNotes, notesCursor, user]);
-
   const handleNotesScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       const top = event.currentTarget.scrollTop <= 0;
@@ -650,12 +403,7 @@ export default function Home() {
       return labelMatches && textMatches;
     });
   }, [notes, search, selectedLabel]);
-
-  useEffect(() => {
-    if (loadingData || visibleNotes.length === 0) {
-      setIsNotesListAtTop(true);
-    }
-  }, [loadingData, visibleNotes.length]);
+  const signOutPinnedVisible = loadingData || visibleNotes.length === 0 || isNotesListAtTop;
 
   const labelNoteCounts = useMemo(() => {
     const counts: Record<string, number> = { none: 0 };
@@ -690,9 +438,11 @@ export default function Home() {
     await signOut(auth);
   };
 
-  const handleCreateLabel = (e: FormEvent) => {
+  const handleCreateLabel = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!db || !user) return;
+    const firestore = db;
+    const uid = user.uid;
 
     const name = newLabel.trim();
     if (!name) return;
@@ -705,65 +455,68 @@ export default function Home() {
     }
 
     const labelId = newId("label");
-    setError("");
-    setNewLabel("");
-    const mutation: SyncMutation = {
-      id: newId("mutation"),
-      type: "label_upsert",
-      label: { id: labelId, name },
-    };
-    setLabels((prev) => applyQueueToLabels(prev, [mutation]));
-    enqueueMutations([mutation]);
+    try {
+      await setDoc(
+        doc(firestore, "users", uid, "labels", labelId),
+        {
+          name,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+      setError("");
+      setNewLabel("");
+    } catch {
+      setError("Unable to save label. Please try again.");
+    }
   };
 
-  const handleDeleteLabel = (labelId: string) => {
-    if (!user) return;
-    const noteMutations: SyncMutation[] = [];
-    const deleteMutation: SyncMutation = {
-      id: newId("mutation"),
-      type: "label_delete",
-      labelId,
-    };
+  const handleDeleteLabel = async (labelId: string) => {
+    if (!db || !user) return;
+    const firestore = db;
+    const uid = user.uid;
+    const now = timestampNowMs();
+    const affectedNotes = notes.filter((note) => note.labelIds.includes(labelId));
 
-    setLabels((prev) => applyQueueToLabels(prev, [deleteMutation]));
-    setNotes((prev) =>
-      prev.map((note) => {
-        const index = note.labelIds.indexOf(labelId);
-        if (index === -1) return note;
+    try {
+      const batch = writeBatch(firestore);
+      batch.delete(doc(firestore, "users", uid, "labels", labelId));
+      affectedNotes.forEach((note) => {
         const nextLabelIds = note.labelIds.filter((id) => id !== labelId);
         const nextLabelNames = note.labelNames.filter(
-          (_, idx) => idx !== index,
+          (_, idx) => note.labelIds[idx] !== labelId,
         );
-        const updatedNote: Note = {
-          ...note,
-          labelIds: nextLabelIds,
-          labelNames: nextLabelNames,
-          updatedAtMs: Date.now(),
-        };
-        noteMutations.push({
-          id: newId("mutation"),
-          type: "note_upsert",
-          note: {
-            id: updatedNote.id,
-            title: updatedNote.title,
-            body: updatedNote.body,
-            labelIds: updatedNote.labelIds,
-            labelNames: updatedNote.labelNames,
-            updatedAtMs: updatedNote.updatedAtMs,
+        const nextPrimaryLabelId = nextLabelIds[0] ?? "none";
+        const nextPrimaryLabelName = nextLabelNames[0] ?? "No label";
+        batch.set(
+          doc(firestore, "users", uid, "notes", note.id),
+          {
+            labelIds: nextLabelIds,
+            labelNames: nextLabelNames,
+            labelId: nextPrimaryLabelId,
+            labelName: nextPrimaryLabelName,
+            updatedAtMs: now,
+            updatedAt: serverTimestamp(),
           },
-        });
-        return updatedNote;
-      }),
-    );
-    enqueueMutations([deleteMutation, ...noteMutations]);
+          { merge: true },
+        );
+      });
+      await batch.commit();
+      setError("");
+    } catch {
+      setError("Unable to delete label. Please try again.");
+    }
+
     if (selectedLabel === labelId) setSelectedLabel("all");
     setNoteLabels((prev) => prev.filter((id) => id !== labelId));
     setActiveNoteLabels((prev) => prev.filter((id) => id !== labelId));
   };
 
-  const handleSaveNote = (e: FormEvent) => {
+  const handleSaveNote = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!db || !user) return;
+    const firestore = db;
+    const uid = user.uid;
     const title = noteTitle.trim();
     const body = noteBody.trim();
     if (!body) return;
@@ -771,37 +524,32 @@ export default function Home() {
     const selectedLabels = getSelectedLabels(noteLabels);
     const labelIds = selectedLabels.map((label) => label.id);
     const labelNames = selectedLabels.map((label) => label.name);
-    const optimisticId = newId("note");
-    const now = Date.now();
-    const optimisticNote: Note = {
-      id: optimisticId,
-      title,
-      body,
-      labelIds,
-      labelNames,
-      updatedAtMs: now,
-    };
+    const noteId = newId("note");
+    const now = timestampNowMs();
+    const labelId = labelIds[0] ?? "none";
+    const labelName = labelNames[0] ?? "No label";
 
-    setError("");
-    setNotes((prev) => [optimisticNote, ...prev]);
-    setLoadingData(false);
-
-    resetNewNoteDraft();
-    setShowEditor(false);
-    enqueueMutations([
-      {
-        id: newId("mutation"),
-        type: "note_upsert",
-        note: {
-          id: optimisticId,
+    try {
+      await setDoc(
+        doc(firestore, "users", uid, "notes", noteId),
+        {
           title,
           body,
           labelIds,
           labelNames,
+          labelId,
+          labelName,
           updatedAtMs: now,
+          updatedAt: serverTimestamp(),
         },
-      },
-    ]);
+        { merge: true },
+      );
+      setError("");
+      resetNewNoteDraft();
+      setShowEditor(false);
+    } catch {
+      setError("Unable to save note. Please try again.");
+    }
   };
 
   const handleCancelEditor = () => {
@@ -963,49 +711,42 @@ export default function Home() {
     setActiveNoteBody(next.body);
   };
 
-  const handleUpdateNote = () => {
-    if (!user || !activeNoteId) return;
+  const handleUpdateNote = async () => {
+    if (!db || !user || !activeNoteId) return;
+    const firestore = db;
+    const uid = user.uid;
     const title = activeNoteTitle.trim();
     const body = activeNoteBody.trim();
     if (!body) {
       setError("Body is required.");
       return;
     }
-    const now = Date.now();
+    const now = timestampNowMs();
     const selectedLabels = getSelectedLabels(activeNoteLabels);
     const nextLabelIds = selectedLabels.map((label) => label.id);
     const nextLabelNames = selectedLabels.map((label) => label.name);
-    setNotes((prev) =>
-      prev
-        .map((note) =>
-          note.id === activeNoteId
-            ? {
-                ...note,
-                title,
-                body,
-                labelIds: nextLabelIds,
-                labelNames: nextLabelNames,
-                updatedAtMs: now,
-              }
-            : note,
-        )
-        .sort((a, b) => b.updatedAtMs - a.updatedAtMs),
-    );
-    closeNoteDialog();
-    enqueueMutations([
-      {
-        id: newId("mutation"),
-        type: "note_upsert",
-        note: {
-          id: activeNoteId,
+    const nextPrimaryLabelId = nextLabelIds[0] ?? "none";
+    const nextPrimaryLabelName = nextLabelNames[0] ?? "No label";
+    try {
+      await setDoc(
+        doc(firestore, "users", uid, "notes", activeNoteId),
+        {
           title,
           body,
           labelIds: nextLabelIds,
           labelNames: nextLabelNames,
+          labelId: nextPrimaryLabelId,
+          labelName: nextPrimaryLabelName,
           updatedAtMs: now,
+          updatedAt: serverTimestamp(),
         },
-      },
-    ]);
+        { merge: true },
+      );
+      setError("");
+      closeNoteDialog();
+    } catch {
+      setError("Unable to update note. Please try again.");
+    }
   };
 
   const handleCopyCardBody = async (body: string) => {
@@ -1064,7 +805,7 @@ export default function Home() {
       body: activeNoteBody,
       labelIds: selectedLabels.map((label) => label.id),
       labelNames: selectedLabels.map((label) => label.name),
-      updatedAtMs: Date.now(),
+      updatedAtMs: timestampNowMs(),
     });
   };
 
@@ -1074,18 +815,18 @@ export default function Home() {
     setPendingDeleteNoteTitle("");
   };
 
-  const handleConfirmDeleteNote = () => {
-    if (!user || !pendingDeleteNoteId) return;
-    setNotes((prev) => prev.filter((note) => note.id !== pendingDeleteNoteId));
-    enqueueMutations([
-      {
-        id: newId("mutation"),
-        type: "note_delete",
-        noteId: pendingDeleteNoteId,
-      },
-    ]);
-    if (activeNoteId === pendingDeleteNoteId) closeNoteDialog();
-    closeDeleteConfirm();
+  const handleConfirmDeleteNote = async () => {
+    if (!db || !user || !pendingDeleteNoteId) return;
+    const firestore = db;
+    const uid = user.uid;
+    try {
+      await deleteDoc(doc(firestore, "users", uid, "notes", pendingDeleteNoteId));
+      setError("");
+      if (activeNoteId === pendingDeleteNoteId) closeNoteDialog();
+      closeDeleteConfirm();
+    } catch {
+      setError("Unable to delete note. Please try again.");
+    }
   };
 
   if (!firebaseReady) {
@@ -1308,15 +1049,8 @@ export default function Home() {
         ) : (
           <NotesGrid
             visibleNotes={visibleNotes}
-            hasMoreNotes={hasMoreNotes}
-            loadingMoreNotes={loadingMoreNotes}
-            search={search}
-            selectedLabel={selectedLabel}
             onOpenNote={openNoteDialog}
             onCopyCardBody={handleCopyCardBody}
-            onLoadMoreNotes={() => {
-              void handleLoadMoreNotes();
-            }}
             onScroll={handleNotesScroll}
           />
         )}
@@ -1334,7 +1068,7 @@ export default function Home() {
           <i className="fa-solid fa-plus" aria-hidden="true" />
         </button>
         <button
-          className={`signOut ${isNotesListAtTop ? "" : "signOutHidden"}`}
+          className={`signOut ${signOutPinnedVisible ? "" : "signOutHidden"}`}
           type="button"
           onClick={handleSignOut}
         >
@@ -1569,9 +1303,7 @@ export default function Home() {
           </div>
         )}
 
-        {error && error !== HIDDEN_SYNC_WARNING && (
-          <p className="error">{error}</p>
-        )}
+        {error && <p className="error">{error}</p>}
       </section>
     </main>
   );

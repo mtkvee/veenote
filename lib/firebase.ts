@@ -1,12 +1,7 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import {
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,
-} from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -52,23 +47,7 @@ if (
   });
 }
 
-const initFirestore = () => {
-  if (!app) return null;
-  try {
-    if (typeof window !== "undefined") {
-      return initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentSingleTabManager({}),
-        }),
-      });
-    }
-  } catch (err) {
-    console.warn("Firestore persistence init failed, falling back to default client.", err);
-  }
-  return getFirestore(app);
-};
-
 export const firebaseReady = Boolean(app);
 export const auth = app ? getAuth(app) : null;
-export const db = initFirestore();
+export const db = app ? getFirestore(app) : null;
 export const googleProvider = new GoogleAuthProvider();

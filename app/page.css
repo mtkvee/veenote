@@ -161,11 +161,7 @@
 
 .authBrandText {
   color: #4285f4;
-  font-family:
-    cursive,
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
+  font-family: cursive, sans-serif;
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1;
@@ -521,7 +517,6 @@ textarea {
 }
 
 .titleInput {
-  font-weight: 600;
   font-size: 1.35rem;
 }
 
@@ -533,7 +528,6 @@ textarea {
 }
 
 .titleInput::placeholder {
-  font-weight: 600;
   font-size: 1.5rem !important;
 }
 

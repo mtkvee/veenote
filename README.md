@@ -66,11 +66,92 @@ npm run firebase:deploy:firestore
 
 - `users/{uid}/labels/{labelId}`
   - `name: string`
-  - `createdAt: timestamp`
+  - `updatedAt: timestamp`
 - `users/{uid}/notes/{noteId}`
   - `title: string`
   - `body: string`
-  - `labelId: string`
-  - `labelName: string`
-  - `createdAt: timestamp`
+  - `labelIds: string[]`
+  - `labelNames: string[]`
+  - `labelId: string` (legacy/primary label compatibility field)
+  - `labelName: string` (legacy/primary label compatibility field)
+  - `updatedAtMs: number`
   - `updatedAt: timestamp`
+
+## 5. Production sync integration test plan
+
+Goal: verify that create/update/delete changes on Device A appear on Device B automatically with no manual refresh.
+
+### Preconditions
+
+1. Both devices point to the same Firebase project (`.env.local` values match).
+2. Firestore rules/indexes are deployed:
+   ```bash
+   npm run firebase:deploy:firestore
+   ```
+3. Start app:
+   ```bash
+   npm run dev
+   ```
+4. Open app on two browsers/devices and sign in with the same account.
+
+### Test A: Create note propagation
+
+1. On Device A, create a note with unique text like `sync-create-<timestamp>`.
+2. Expected on Device B:
+   - New note appears automatically.
+   - No manual reload required.
+   - Target propagation: typically under 1s on stable network.
+
+### Test B: Update note propagation
+
+1. On Device A, edit the note title/body and save.
+2. Expected on Device B:
+   - Updated fields appear automatically.
+   - Note ordering updates if `updatedAtMs` changes.
+
+### Test C: Delete note propagation
+
+1. On Device A, delete the note.
+2. Expected on Device B:
+   - Note disappears automatically without refresh.
+
+### Test D: Label create/update relationship propagation
+
+1. On Device A, create a new label and assign it to an existing note.
+2. Expected on Device B:
+   - Label appears in label manager/filter.
+   - Note shows assigned label(s).
+
+### Test E: Label delete cascades to notes
+
+1. On Device A, delete a label currently attached to one or more notes.
+2. Expected on Device B:
+   - Label is removed from label manager/filter.
+   - Affected notes no longer include that label.
+
+### Test F: Auth change cleanup/re-subscribe
+
+1. On Device A, sign out and sign in again.
+2. Expected:
+   - Old user data is cleared on sign-out.
+   - After sign-in, notes/labels rehydrate via live snapshots.
+3. While Device A is signed out, create/edit notes from Device B.
+4. Sign Device A back in.
+5. Expected:
+   - Device A receives latest remote state automatically.
+
+### Test G: Offline -> online recovery
+
+1. On Device A, disconnect network (airplane mode or devtools offline).
+2. Try creating/updating a note.
+3. Reconnect network.
+4. Expected:
+   - Failed write paths show an error prompt.
+   - Retried action after reconnect commits successfully.
+   - Device B reflects committed changes automatically.
+
+### Pass criteria
+
+1. All tests A-G pass with no manual refresh.
+2. No stale notes/labels remain after auth transitions.
+3. Cross-device state converges to identical notes/labels for the same user.
