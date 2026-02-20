@@ -161,11 +161,9 @@
 
 .authBrandText {
   color: #4285f4;
-  font-family: cursive, sans-serif;
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1;
-  padding-bottom: 0.2rem;
 }
 
 .googleLogoIcon {
@@ -444,6 +442,7 @@ textarea {
   font-weight: bold;
   color: #fff;
   font-size: 1.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .fab:hover {
