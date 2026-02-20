@@ -133,7 +133,11 @@ type LabelTriggerGroupProps = {
   onRemove: (id: string) => void;
 };
 
-function LabelTriggerGroup({ labels, onOpen, onRemove }: LabelTriggerGroupProps) {
+function LabelTriggerGroup({
+  labels,
+  onOpen,
+  onRemove,
+}: LabelTriggerGroupProps) {
   return (
     <div className="labelTriggerGroup">
       <button
@@ -214,7 +218,10 @@ function NoteLabelPickerDialog({
 
   return (
     <div className="pickerBackdrop noteLabelPickerBackdrop" onClick={onClose}>
-      <div className="noteLabelPickerDialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="noteLabelPickerDialog"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="noteLabelOptions">
           {labels.map((label) => (
             <button
@@ -277,7 +284,9 @@ function NotesGrid({
             <i className="fa-solid fa-copy" aria-hidden="true" />
           </button>
           <h3 title={note.title}>
-            {note.title.length > 12 ? `${note.title.slice(0, 12)}...` : note.title}
+            {note.title.length > 12
+              ? `${note.title.slice(0, 12)}...`
+              : note.title}
           </h3>
           <p>{note.body}</p>
           <time className="cardTime">
@@ -338,6 +347,7 @@ export default function Home() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const createSaveInFlightRef = useRef(false);
   const noteWriteInFlightRef = useRef<Set<string>>(new Set());
+  const noteDeleteInFlightRef = useRef<Set<string>>(new Set());
   const hasMainOverlayOpen =
     showLabelManager ||
     showFilterPicker ||
@@ -377,6 +387,7 @@ export default function Home() {
         setLoadingData(false);
         createSaveInFlightRef.current = false;
         noteWriteInFlightRef.current.clear();
+        noteDeleteInFlightRef.current.clear();
       } else {
         setLabels([]);
         setNotes([]);
@@ -411,7 +422,10 @@ export default function Home() {
               map.delete(change.doc.id);
               return;
             }
-            map.set(change.doc.id, { id: change.doc.id, name: data.name ?? "" });
+            map.set(change.doc.id, {
+              id: change.doc.id,
+              name: data.name ?? "",
+            });
           });
           return Array.from(map.values());
         });
@@ -431,7 +445,10 @@ export default function Home() {
           if (changes.length === 0 || changes.length === snapshot.docs.length) {
             return sortNotesByUpdatedAtDesc(
               snapshot.docs.map((docItem) =>
-                mapFirestoreNote(docItem.id, docItem.data() as FirestoreNoteData),
+                mapFirestoreNote(
+                  docItem.id,
+                  docItem.data() as FirestoreNoteData,
+                ),
               ),
             );
           }
@@ -443,7 +460,10 @@ export default function Home() {
             }
             map.set(
               change.doc.id,
-              mapFirestoreNote(change.doc.id, change.doc.data() as FirestoreNoteData),
+              mapFirestoreNote(
+                change.doc.id,
+                change.doc.data() as FirestoreNoteData,
+              ),
             );
           });
           return sortNotesByUpdatedAtDesc(Array.from(map.values()));
@@ -507,7 +527,8 @@ export default function Home() {
       return labelMatches && textMatches;
     });
   }, [notes, search, selectedLabel]);
-  const signOutPinnedVisible = loadingData || visibleNotes.length === 0 || isNotesListAtTop;
+  const signOutPinnedVisible =
+    loadingData || visibleNotes.length === 0 || isNotesListAtTop;
 
   const labelNoteCounts = useMemo(() => {
     const counts: Record<string, number> = { none: 0 };
@@ -580,7 +601,9 @@ export default function Home() {
     const firestore = db;
     const uid = user.uid;
     const now = timestampNowMs();
-    const affectedNotes = notes.filter((note) => note.labelIds.includes(labelId));
+    const affectedNotes = notes.filter((note) =>
+      note.labelIds.includes(labelId),
+    );
 
     try {
       const batch = writeBatch(firestore);
@@ -607,7 +630,7 @@ export default function Home() {
       });
       await batch.commit();
       setError("");
-      showToast("Item deleted.", "success");
+      showToast("Note deleted.", "success");
     } catch {
       setError("Unable to delete label. Please try again.");
     }
@@ -964,19 +987,41 @@ export default function Home() {
     setPendingDeleteNoteTitle("");
   };
 
-  const handleConfirmDeleteNote = async () => {
+  const handleConfirmDeleteNote = () => {
     if (!db || !user || !pendingDeleteNoteId) return;
+    const noteId = pendingDeleteNoteId;
+    if (noteDeleteInFlightRef.current.has(noteId)) {
+      closeDeleteConfirm();
+      return;
+    }
+    const deletedNote = notes.find((note) => note.id === noteId);
+    if (!deletedNote) {
+      closeDeleteConfirm();
+      return;
+    }
+
     const firestore = db;
     const uid = user.uid;
-    try {
-      await deleteDoc(doc(firestore, "users", uid, "notes", pendingDeleteNoteId));
-      setError("");
-      if (activeNoteId === pendingDeleteNoteId) closeNoteDialog();
-      closeDeleteConfirm();
-      showToast("Item deleted.", "success");
-    } catch {
-      setError("Unable to delete note. Please try again.");
-    }
+    noteDeleteInFlightRef.current.add(noteId);
+    setError("");
+    if (activeNoteId === noteId) closeNoteDialog();
+    closeDeleteConfirm();
+    setNotes((prev) => prev.filter((note) => note.id !== noteId));
+    showToast("Item deleted.", "success");
+
+    void (async () => {
+      try {
+        await deleteDoc(doc(firestore, "users", uid, "notes", noteId));
+      } catch {
+        setNotes((prev) => {
+          if (prev.some((note) => note.id === noteId)) return prev;
+          return sortNotesByUpdatedAtDesc([...prev, deletedNote]);
+        });
+        showToast("Unable to delete note. Restored item.", "info");
+      } finally {
+        noteDeleteInFlightRef.current.delete(noteId);
+      }
+    })();
   };
 
   if (!firebaseReady) {
@@ -1092,7 +1137,9 @@ export default function Home() {
                 labels={noteLabelItems}
                 onOpen={() => setShowEditorLabelPicker(true)}
                 onRemove={(id) => {
-                  setNoteLabels((prev) => prev.filter((labelId) => labelId !== id));
+                  setNoteLabels((prev) =>
+                    prev.filter((labelId) => labelId !== id),
+                  );
                 }}
               />
               <div className="dialogBottomActions">

@@ -5,15 +5,22 @@ type ToastViewportProps = {
 };
 
 export function ToastViewport({ toasts }: ToastViewportProps) {
+  const copyToasts = toasts.filter(
+    (toast) =>
+      toast.message === "Copy to clipboard." ||
+      toast.message === "Copied to clipboard.",
+  );
+  if (copyToasts.length === 0) return null;
+
   return (
     <div className="toastViewport" aria-live="polite" aria-atomic="false">
-      {toasts.map((toast) => (
+      {copyToasts.map((toast) => (
         <div
           key={toast.id}
-          className={`toast toast${toast.kind === "success" ? "Success" : "Info"}`}
+          className="toast toastInfo"
           role="status"
         >
-          {toast.message}
+          Copy to clipboard.
         </div>
       ))}
     </div>

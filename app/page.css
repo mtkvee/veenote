@@ -172,6 +172,12 @@
   flex: 0 0 1.25rem;
 }
 
+.toastViewport {
+  width: fit-content;
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: 3fr auto auto;
