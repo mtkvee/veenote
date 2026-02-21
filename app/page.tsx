@@ -23,8 +23,6 @@ import {
 import { auth, db, firebaseReady, googleProvider } from "@/lib/firebase";
 import { mapFirestoreNote, newId } from "@/lib/notesSync";
 import type { Label, Note } from "@/lib/notesSync";
-import { ToastViewport } from "@/app/components/ToastViewport";
-import { useToasts } from "@/lib/useToasts";
 import "./page.css";
 
 const MAX_HISTORY_SIZE = 200;
@@ -313,7 +311,6 @@ function NotesGrid({
 }
 
 export default function Home() {
-  const { toasts, showToast } = useToasts();
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [labels, setLabels] = useState<Label[]>([]);
@@ -343,8 +340,10 @@ export default function Home() {
   const [dialogRedoStack, setDialogRedoStack] = useState<DraftHistory[]>([]);
   const [activeNoteLabels, setActiveNoteLabels] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [showCopyStatus, setShowCopyStatus] = useState(false);
   const [isNotesListAtTop, setIsNotesListAtTop] = useState(true);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const copyStatusTimerRef = useRef<number | null>(null);
   const createSaveInFlightRef = useRef(false);
   const noteWriteInFlightRef = useRef<Set<string>>(new Set());
   const noteDeleteInFlightRef = useRef<Set<string>>(new Set());
@@ -507,6 +506,14 @@ export default function Home() {
     };
   }, [search]);
 
+  useEffect(() => {
+    return () => {
+      if (copyStatusTimerRef.current !== null) {
+        window.clearTimeout(copyStatusTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleNotesScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       const top = event.currentTarget.scrollTop <= 0;
@@ -630,7 +637,6 @@ export default function Home() {
       });
       await batch.commit();
       setError("");
-      showToast("Note deleted.", "success");
     } catch {
       setError("Unable to delete label. Please try again.");
     }
@@ -691,7 +697,7 @@ export default function Home() {
         );
       } catch {
         setNotes((prev) => prev.filter((note) => note.id !== noteId));
-        showToast("Unable to sync note. Please try saving again.", "info");
+        setError("Unable to sync note. Please try saving again.");
       } finally {
         createSaveInFlightRef.current = false;
       }
@@ -911,7 +917,7 @@ export default function Home() {
             prev.map((note) => (note.id === noteId ? previousNote : note)),
           ),
         );
-        showToast("Unable to sync update. Changes were reverted.", "info");
+        setError("Unable to sync update. Changes were reverted.");
       } finally {
         noteWriteInFlightRef.current.delete(noteId);
       }
@@ -921,7 +927,14 @@ export default function Home() {
   const handleCopyCardBody = async (body: string) => {
     try {
       await navigator.clipboard.writeText(body);
-      showToast("Copied to clipboard.", "success");
+      setShowCopyStatus(true);
+      if (copyStatusTimerRef.current !== null) {
+        window.clearTimeout(copyStatusTimerRef.current);
+      }
+      copyStatusTimerRef.current = window.setTimeout(() => {
+        setShowCopyStatus(false);
+        copyStatusTimerRef.current = null;
+      }, 1700);
     } catch {
       setError("Copy failed. Clipboard permission may be blocked.");
     }
@@ -937,7 +950,6 @@ export default function Home() {
         },
         { forceCheckpoint: true },
       );
-      showToast("Pasted from clipboard.", "info");
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -953,7 +965,6 @@ export default function Home() {
         },
         { forceCheckpoint: true },
       );
-      showToast("Pasted from clipboard.", "info");
     } catch {
       setError("Paste failed. Clipboard permission may be blocked.");
     }
@@ -1007,7 +1018,6 @@ export default function Home() {
     if (activeNoteId === noteId) closeNoteDialog();
     closeDeleteConfirm();
     setNotes((prev) => prev.filter((note) => note.id !== noteId));
-    showToast("Item deleted.", "success");
 
     void (async () => {
       try {
@@ -1017,7 +1027,7 @@ export default function Home() {
           if (prev.some((note) => note.id === noteId)) return prev;
           return sortNotesByUpdatedAtDesc([...prev, deletedNote]);
         });
-        showToast("Unable to delete note. Restored item.", "info");
+        setError("Unable to delete note. Restored item.");
       } finally {
         noteDeleteInFlightRef.current.delete(noteId);
       }
@@ -1087,7 +1097,6 @@ export default function Home() {
             </div>
           </div>
           {error && <p className="error">{error}</p>}
-          <ToastViewport toasts={toasts} />
         </section>
       </main>
     );
@@ -1202,7 +1211,6 @@ export default function Home() {
             }}
             onClose={() => setShowEditorLabelPicker(false)}
           />
-          <ToastViewport toasts={toasts} />
         </section>
       </main>
     );
@@ -1503,7 +1511,11 @@ export default function Home() {
         )}
 
         {error && <p className="error">{error}</p>}
-        <ToastViewport toasts={toasts} />
+        {showCopyStatus && (
+          <p className="copyStatusIndicator" role="status" aria-live="polite">
+            Copied to clipboard!
+          </p>
+        )}
       </section>
     </main>
   );
