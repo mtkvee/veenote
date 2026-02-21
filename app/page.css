@@ -144,6 +144,7 @@
   justify-content: center;
   gap: 0.6rem;
   box-shadow: 0 4px 10px rgba(80, 80, 80, 0.12);
+  cursor: pointer;
 }
 
 .authBrand {
@@ -434,7 +435,7 @@ textarea {
   border: 0;
   font-weight: 500;
   border-radius: 999px;
-  background: #737373;
+  background: #505050;
   color: var(--ui-text);
   box-shadow: 0 0 2px #000;
   -webkit-tap-highlight-color: transparent;
@@ -579,21 +580,21 @@ textarea {
   position: absolute;
   left: 1rem;
   bottom: 1rem;
-  border: 0;
+  border: 1px solid var(--ui-border);
   border-radius: 30px;
-  padding: 0.75rem;
+  cursor: pointer;
+  padding: 0.85rem 0.75rem;
   background: var(--ui-bg);
   font-size: 0.95rem;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  box-shadow: 0 4px 10px rgba(80, 80, 80, 0.12);
   -webkit-tap-highlight-color: transparent;
 }
 
 .signOut:hover {
-  background: var(--ui-bg);
+  background: var(--ui-hover);
   box-shadow: 0 4px 10px rgba(80, 80, 80, 0.12);
 }
 

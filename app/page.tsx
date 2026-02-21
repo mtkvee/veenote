@@ -1279,8 +1279,7 @@ export default function Home() {
           type="button"
           onClick={handleSignOut}
         >
-          <GoogleLogoIcon />
-          Sign Out
+          <i className="fa-solid fa-right-from-bracket"></i>
         </button>
         {showLabelManager && (
           <div
