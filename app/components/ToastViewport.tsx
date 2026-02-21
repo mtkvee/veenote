@@ -17,7 +17,7 @@ export function ToastViewport({ toasts }: ToastViewportProps) {
       {copyToasts.map((toast) => (
         <div
           key={toast.id}
-          className="toast toastInfo"
+          className="toast toastInfo toastCopy"
           role="status"
         >
           Copy to clipboard.

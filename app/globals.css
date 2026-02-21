@@ -81,6 +81,11 @@ a {
   color: #505050;
 }
 
+.toastCopy {
+  background: transparent;
+  color: #505050;
+}
+
 .toastSuccess {
   background: #e8f7eb;
   border-color: #b8e4c0;

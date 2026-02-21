@@ -90,7 +90,7 @@
   overflow: hidden;
   width: min(100%, 390px);
   height: 91dvh;
-  min-height: 91dvh;
+  min-height: 94dvh;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -1097,8 +1097,6 @@ textarea {
 @media (max-width: 480px) {
   .phone {
     width: 100%;
-    height: 88dvh;
-    min-height: 88dvh;
     border-radius: 22px;
   }
 
